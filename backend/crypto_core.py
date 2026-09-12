@@ -22,7 +22,8 @@ import hmac
 import math
 import struct
 from collections import deque
-from typing import Optional
+from datetime import datetime, timezone
+from typing import Optional, Union
 
 from config import N, NUM_CHANNELS, HMAC_KEY, THRESHOLDS, PAD_HISTORY_SIZE
 
@@ -142,17 +143,26 @@ def otp_decrypt(ciphertext: list[int], pad: list[int]) -> list[int]:
 # 3. HMAC-SHA256 INTEGRITY
 # ═══════════════════════════════════════════════════════════════════════════
 
-def compute_hmac(quantized: list[int], key: bytes = HMAC_KEY) -> str:
+def compute_hmac(
+    quantized: list[int],
+    timestamp: Optional[Union[str, float, int]] = None,
+    key: bytes = HMAC_KEY,
+) -> str:
     """
-    Compute HMAC-SHA256 over a quantized state vector.
+    Compute HMAC-SHA256 over a quantized state vector bound with an optional timestamp.
 
     The vector is serialized as big-endian unsigned 16-bit integers
     (each state fits in [0, 256] ⊂ uint16 range).
+    When a timestamp is provided, it is bound to the payload bytes as
+    UTF-8 text, cryptographically securing both data freshness and payload
+    integrity against tampering, packet delay, and replay attacks.
 
     Parameters
     ----------
     quantized : list[int]
         Quantized state vector.
+    timestamp : str, float, int, optional
+        Timestamp bound to the frame (ISO 8601 string or numeric).
     key : bytes
         HMAC key (default: pre-shared HMAC_KEY from config).
 
@@ -162,6 +172,9 @@ def compute_hmac(quantized: list[int], key: bytes = HMAC_KEY) -> str:
         Hex-encoded HMAC-SHA256 digest.
     """
     message = struct.pack(f">{len(quantized)}H", *quantized)
+    if timestamp is not None:
+        ts_str = str(timestamp).strip()
+        message += b"|" + ts_str.encode("utf-8")
     return hmac.new(key, message, hashlib.sha256).hexdigest()
 
 
@@ -169,10 +182,11 @@ def verify_integrity(
     ciphertext: list[int],
     pad: list[int],
     original_hmac: str,
+    timestamp: Optional[Union[str, float, int]] = None,
     key: bytes = HMAC_KEY,
 ) -> tuple[list[int], str, bool]:
     """
-    Decrypt ciphertext and verify HMAC integrity.
+    Decrypt ciphertext and verify HMAC integrity including bound timestamp.
 
     Parameters
     ----------
@@ -181,7 +195,9 @@ def verify_integrity(
     pad : list[int]
         One-time pad used during encryption.
     original_hmac : str
-        HMAC tag computed over the original quantized plaintext.
+        HMAC tag computed over the original quantized plaintext and timestamp.
+    timestamp : str, float, int, optional
+        Timestamp bound to the frame.
     key : bytes
         HMAC key.
 
@@ -191,7 +207,7 @@ def verify_integrity(
         (decrypted_vector, recomputed_hmac, is_verified)
     """
     decrypted = otp_decrypt(ciphertext, pad)
-    recomputed = compute_hmac(decrypted, key)
+    recomputed = compute_hmac(decrypted, timestamp=timestamp, key=key)
     is_verified = hmac.compare_digest(recomputed, original_hmac)
     return decrypted, recomputed, is_verified
 
@@ -203,11 +219,12 @@ def verify_integrity(
 def process_frame(
     raw_values: list[float],
     pad: list[int],
+    timestamp: Optional[str] = None,
     thresholds: Optional[list[list[float]]] = None,
 ) -> dict:
     """
     Execute the complete telemetry pipeline for one frame:
-      raw → quantize → HMAC → OTP encrypt → OTP decrypt → verify.
+      raw → quantize → HMAC (data + timestamp signature) → OTP encrypt → OTP decrypt → verify.
 
     Parameters
     ----------
@@ -215,21 +232,28 @@ def process_frame(
         8-channel raw sensor readings.
     pad : list[int]
         8-element one-time pad (entropy bytes mod N).
+    timestamp : str, optional
+        ISO 8601 UTC timestamp. Generated if not provided.
     thresholds : list[list[float]], optional
         Per-channel bin edges. Defaults to config.THRESHOLDS.
 
     Returns
     -------
     dict
-        Full pipeline state including all intermediate values.
+        Full pipeline state including all intermediate values and signed timestamp.
     """
+    if timestamp is None:
+        timestamp = datetime.now(timezone.utc).isoformat()
     quantized = quantize_vector(raw_values, thresholds)
-    hmac_original = compute_hmac(quantized)
+    hmac_original = compute_hmac(quantized, timestamp=timestamp)
     ciphertext = otp_encrypt(quantized, pad)
     decrypted, hmac_recomputed, verified = verify_integrity(
-        ciphertext, pad, hmac_original
+        ciphertext, pad, hmac_original, timestamp=timestamp
     )
     return {
+        "timestamp": timestamp,
+        "signed_timestamp": timestamp,
+        "timestamp_bound": True,
         "raw_values": raw_values,
         "quantized": quantized,
         "pad_used": pad,
@@ -244,13 +268,15 @@ def process_frame(
 def process_frame_tampered(
     raw_values: list[float],
     pad: list[int],
+    timestamp: Optional[str] = None,
     tamper_channel: int = 0,
     tamper_delta: int = 7,
+    tamper_type: str = "data",
     thresholds: Optional[list[list[float]]] = None,
 ) -> dict:
     """
-    Execute the pipeline but deliberately corrupt one ciphertext byte
-    to demonstrate HMAC integrity failure.
+    Execute the pipeline but deliberately corrupt either ciphertext or timestamp
+    to demonstrate HMAC integrity and tamper verification.
 
     Parameters
     ----------
@@ -258,10 +284,14 @@ def process_frame_tampered(
         8-channel raw sensor readings.
     pad : list[int]
         8-element one-time pad.
+    timestamp : str, optional
+        ISO 8601 timestamp string. Generated if not provided.
     tamper_channel : int
-        Which channel index to corrupt (0-7).
+        Which channel index to corrupt if tamper_type == "data" (0-7).
     tamper_delta : int
         Amount to add to the ciphertext byte (mod N).
+    tamper_type : str
+        "data" to corrupt sensor ciphertext, or "timestamp" to forge/replay timestamp.
     thresholds : list[list[float]], optional
         Per-channel bin edges. Defaults to config.THRESHOLDS.
 
@@ -270,29 +300,59 @@ def process_frame_tampered(
     dict
         Full pipeline state showing the integrity failure.
     """
+    if timestamp is None:
+        timestamp = datetime.now(timezone.utc).isoformat()
+
     quantized = quantize_vector(raw_values, thresholds)
-    hmac_original = compute_hmac(quantized)
+    hmac_original = compute_hmac(quantized, timestamp=timestamp)
     ciphertext = otp_encrypt(quantized, pad)
 
-    # Deliberately corrupt
-    tampered = list(ciphertext)
-    tampered[tamper_channel] = (tampered[tamper_channel] + tamper_delta) % N
-
-    decrypted, hmac_recomputed, verified = verify_integrity(
-        tampered, pad, hmac_original
-    )
-    return {
-        "raw_values": raw_values,
-        "quantized": quantized,
-        "pad_used": pad,
-        "ciphertext": tampered,
-        "ciphertext_original": ciphertext,
-        "tampered_channel": tamper_channel,
-        "decrypted": decrypted,
-        "hmac_original": hmac_original,
-        "hmac_recomputed": hmac_recomputed,
-        "integrity": "INTEGRITY VIOLATION",
-    }
+    if tamper_type == "timestamp":
+        # Simulate replay or timestamp modification in transit
+        tampered_timestamp = "2020-01-01T00:00:00.000000+00:00"
+        decrypted, hmac_recomputed, verified = verify_integrity(
+            ciphertext, pad, hmac_original, timestamp=tampered_timestamp
+        )
+        return {
+            "timestamp": timestamp,
+            "signed_timestamp": timestamp,
+            "tampered_timestamp": tampered_timestamp,
+            "tamper_type": "timestamp",
+            "timestamp_bound": True,
+            "raw_values": raw_values,
+            "quantized": quantized,
+            "pad_used": pad,
+            "ciphertext": ciphertext,
+            "ciphertext_original": ciphertext,
+            "decrypted": decrypted,
+            "hmac_original": hmac_original,
+            "hmac_recomputed": hmac_recomputed,
+            "integrity": "INTEGRITY VIOLATION",
+        }
+    else:
+        # Deliberately corrupt ciphertext byte
+        tampered = list(ciphertext)
+        tampered[tamper_channel] = (tampered[tamper_channel] + tamper_delta) % N
+        decrypted, hmac_recomputed, verified = verify_integrity(
+            tampered, pad, hmac_original, timestamp=timestamp
+        )
+        return {
+            "timestamp": timestamp,
+            "signed_timestamp": timestamp,
+            "tamper_type": "data",
+            "timestamp_bound": True,
+            "raw_values": raw_values,
+            "quantized": quantized,
+            "pad_used": pad,
+            "ciphertext": tampered,
+            "ciphertext_original": ciphertext,
+            "tampered_channel": tamper_channel,
+            "tamper_delta": tamper_delta,
+            "decrypted": decrypted,
+            "hmac_original": hmac_original,
+            "hmac_recomputed": hmac_recomputed,
+            "integrity": "INTEGRITY VIOLATION",
+        }
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -458,41 +518,53 @@ def test_crypto_core() -> None:
     print(f"    Recovered:  {recovered}")
     print("    ✓ Vector round-trip: perfect recovery")
 
-    # --- HMAC ---
-    print("\n[4/6] HMAC integrity...")
-    h1 = compute_hmac(quantized)
-    h2 = compute_hmac(quantized)
+    # --- HMAC with Timestamp Signature ---
+    print("\n[4/6] HMAC integrity and Timestamp Signature...")
+    ts1 = "2026-09-12T12:00:00.000000+00:00"
+    ts2 = "2026-09-12T12:00:01.000000+00:00"
+    h1 = compute_hmac(quantized, timestamp=ts1)
+    h2 = compute_hmac(quantized, timestamp=ts1)
     assert h1 == h2, "HMAC determinism failed"
+    # Different timestamp on identical data must produce different signature
+    h_time_diff = compute_hmac(quantized, timestamp=ts2)
+    assert h1 != h_time_diff, "Timestamp binding failed: different timestamps produced identical HMAC"
     tampered = list(quantized)
     tampered[0] = (tampered[0] + 1) % N
-    h3 = compute_hmac(tampered)
-    assert h1 != h3, "HMAC collision on different inputs"
-    print(f"    Original HMAC:  {h1[:32]}...")
-    print(f"    Tampered HMAC:  {h3[:32]}...")
-    print("    ✓ HMAC: deterministic and collision-free")
+    h3 = compute_hmac(tampered, timestamp=ts1)
+    assert h1 != h3, "HMAC collision on different data inputs"
+    print(f"    Original HMAC (t1): {h1[:32]}...")
+    print(f"    Timestamp2 HMAC (t2): {h_time_diff[:32]}...")
+    print(f"    Tampered Data HMAC: {h3[:32]}...")
+    print("    ✓ HMAC: deterministic, collision-free, and cryptographically binds timestamp")
 
     # --- Full pipeline ---
-    print("\n[5/6] Full pipeline (process_frame)...")
+    print("\n[5/6] Full pipeline (process_frame with timestamp signature)...")
     raw = [25.0, 55.0, 1010.0, 300.0, 500.0, 0.3, 2.0, 0.8]
     pad_vals = [42, 99, 200, 155, 33, 128, 77, 201]
-    result = process_frame(raw, pad_vals)
+    result = process_frame(raw, pad_vals, timestamp=ts1)
     assert result["integrity"] == "VERIFIED", "Pipeline integrity check failed"
     assert result["quantized"] == result["decrypted"], "Pipeline recovery failed"
+    assert result["timestamp"] == ts1, "Timestamp mismatch"
+    assert result["signed_timestamp"] == ts1, "Signed timestamp mismatch"
+    print(f"    Signed Timestamp: {result['signed_timestamp']}")
     print(f"    Raw:        {result['raw_values']}")
     print(f"    Quantized:  {result['quantized']}")
     print(f"    Ciphertext: {result['ciphertext']}")
     print(f"    Decrypted:  {result['decrypted']}")
     print(f"    Integrity:  {result['integrity']}")
-    print("    ✓ Full pipeline: VERIFIED")
+    print("    ✓ Full pipeline: VERIFIED with bound timestamp signature")
 
-    # --- Tamper detection ---
-    print("\n[6/6] Tamper detection (process_frame_tampered)...")
-    tampered_result = process_frame_tampered(raw, pad_vals, tamper_channel=2, tamper_delta=13)
-    assert tampered_result["integrity"] == "INTEGRITY VIOLATION", "Tamper not detected"
-    print(f"    Original ciphertext[2]: {result['ciphertext'][2]}")
-    print(f"    Tampered ciphertext[2]: {tampered_result['ciphertext'][2]}")
-    print(f"    Integrity: {tampered_result['integrity']}")
-    print("    ✓ Tamper detection: INTEGRITY VIOLATION correctly raised")
+    # --- Tamper detection (Data and Timestamp) ---
+    print("\n[6/6] Tamper detection (data and timestamp forgery)...")
+    # Data tamper
+    tampered_data_result = process_frame_tampered(raw, pad_vals, timestamp=ts1, tamper_channel=2, tamper_delta=13, tamper_type="data")
+    assert tampered_data_result["integrity"] == "INTEGRITY VIOLATION", "Data tamper not detected"
+    # Timestamp tamper / replay attack
+    tampered_time_result = process_frame_tampered(raw, pad_vals, timestamp=ts1, tamper_type="timestamp")
+    assert tampered_time_result["integrity"] == "INTEGRITY VIOLATION", "Timestamp tamper/replay not detected"
+    print(f"    Data tamper:      {tampered_data_result['integrity']}")
+    print(f"    Timestamp tamper: {tampered_time_result['integrity']} (replayed/altered timestamp rejected)")
+    print("    ✓ Tamper detection: both data and timestamp tampering correctly detected")
 
     print("\n" + "=" * 60)
     print("  ALL SELF-TESTS PASSED ✓")

@@ -70,11 +70,14 @@
 
         // Telemetry Panels
         channelGrid: document.getElementById("channel-grid"),
+        signedTimestamp: document.getElementById("signed-timestamp"),
+        timeVerifiedBadge: document.getElementById("time-verified-badge"),
         hmacOriginal: document.getElementById("hmac-original"),
         hmacRecomputed: document.getElementById("hmac-recomputed"),
         integrityBadge: document.getElementById("integrity-badge"),
         integrityPanel: document.getElementById("integrity-panel"),
         tamperBtn: document.getElementById("tamper-btn"),
+        tamperTimeBtn: document.getElementById("tamper-time-btn"),
         hmacMatchIndicator: document.getElementById("hmac-match-indicator"),
         matchIcon: document.getElementById("match-icon"),
         matchText: document.getElementById("match-text"),
@@ -98,7 +101,14 @@
         scanSerialPorts();
 
         if (dom.tamperBtn) {
-            dom.tamperBtn.addEventListener("click", triggerTamper);
+            dom.tamperBtn.addEventListener("click", function () {
+                triggerTamper("data");
+            });
+        }
+        if (dom.tamperTimeBtn) {
+            dom.tamperTimeBtn.addEventListener("click", function () {
+                triggerTamper("timestamp");
+            });
         }
     }
 
@@ -670,11 +680,36 @@
 
     /* ── Integrity Panel (Fully Dynamic) ──────────────────────────────── */
     function updateIntegrityPanel(data) {
+        /* Update signed timestamp display */
+        if (dom.signedTimestamp) {
+            let tsStr = data.signed_timestamp || data.timestamp || "—";
+            dom.signedTimestamp.textContent = tsStr;
+        }
+
         /* Update HMAC hash displays */
         if (dom.hmacOriginal) dom.hmacOriginal.textContent = formatHex(data.hmac_original);
         if (dom.hmacRecomputed) dom.hmacRecomputed.textContent = formatHex(data.hmac_recomputed);
 
         const verified = data.integrity === "VERIFIED";
+
+        /* Signature / Timestamp binding badge */
+        if (dom.timeVerifiedBadge) {
+            if (verified) {
+                dom.timeVerifiedBadge.textContent = "[ BOUND IN HMAC ✓ ]";
+                dom.timeVerifiedBadge.className = "sig-badge verified";
+                if (dom.signedTimestamp) dom.signedTimestamp.classList.remove("mismatch");
+            } else {
+                if (data.tamper_type === "timestamp") {
+                    dom.timeVerifiedBadge.textContent = "[ FORGED / REPLAY ✗ ]";
+                    dom.timeVerifiedBadge.className = "sig-badge failed";
+                    if (dom.signedTimestamp) dom.signedTimestamp.classList.add("mismatch");
+                } else {
+                    dom.timeVerifiedBadge.textContent = "[ SIG INVALID ✗ ]";
+                    dom.timeVerifiedBadge.className = "sig-badge failed";
+                    if (dom.signedTimestamp) dom.signedTimestamp.classList.remove("mismatch");
+                }
+            }
+        }
 
         /* Increment check counter */
         integrityCheckCount++;
@@ -689,7 +724,11 @@
             } else {
                 dom.hmacMatchIndicator.className = "hmac-match-indicator mismatched";
                 if (dom.matchIcon) dom.matchIcon.textContent = "✗";
-                if (dom.matchText) dom.matchText.textContent = "HASH MISMATCH — INTEGRITY VIOLATION DETECTED";
+                if (dom.matchText) {
+                    dom.matchText.textContent = data.tamper_type === "timestamp"
+                        ? "TIMESTAMP SIGNATURE MISMATCH — FORGERY DETECTED"
+                        : "HASH MISMATCH — INTEGRITY VIOLATION DETECTED";
+                }
             }
         }
 
@@ -734,12 +773,19 @@
 
         /* Reset tamper armed state after violation is detected */
         if (!verified && tamperArmed) {
-            tamperArmed = false;
-            if (dom.tamperBtn) {
+            const armedMode = tamperArmed;
+            tamperArmed = null;
+            if (armedMode === "timestamp" && dom.tamperTimeBtn) {
+                dom.tamperTimeBtn.innerHTML = '<span class="hud-bracket">[</span> FORGERY CAUGHT <span class="hud-bracket">]</span>';
+                setTimeout(function () {
+                    dom.tamperTimeBtn.disabled = false;
+                    dom.tamperTimeBtn.innerHTML = '<span class="hud-bracket">[</span> TAMPER TIMESTAMP <span class="hud-bracket">]</span>';
+                }, 2500);
+            } else if (dom.tamperBtn) {
                 dom.tamperBtn.innerHTML = '<span class="hud-bracket">[</span> VIOLATION DETECTED <span class="hud-bracket">]</span>';
                 setTimeout(function () {
                     dom.tamperBtn.disabled = false;
-                    dom.tamperBtn.innerHTML = '<span class="hud-bracket">[</span> TAMPER TEST <span class="hud-bracket">]</span>';
+                    dom.tamperBtn.innerHTML = '<span class="hud-bracket">[</span> TAMPER DATA <span class="hud-bracket">]</span>';
                 }, 2500);
             }
         }
@@ -765,10 +811,13 @@
         }
 
         /* Build detail string */
-        let detail = "HMAC integrity violation — ciphertext corrupted";
-        if (data.tampered_channel !== undefined) {
+        let detail = "HMAC integrity violation — signature verification failed";
+        if (data.tamper_type === "timestamp") {
+            const altered = data.tampered_timestamp ? ` (${data.tampered_timestamp.substring(0, 10)})` : "";
+            detail = `Timestamp signature mismatch — forged/replayed timestamp detected${altered}`;
+        } else if (data.tampered_channel !== undefined) {
             const chLabel = activeLabels[data.tampered_channel] || ("CH" + data.tampered_channel);
-            detail = `Tampered CH${data.tampered_channel} (${chLabel}) — HMAC mismatch detected`;
+            detail = `Tampered CH${data.tampered_channel} (${chLabel}) — ciphertext corrupted, HMAC signature rejected`;
         }
 
         const entry = document.createElement("div");
@@ -1015,33 +1064,41 @@
         }
     }
 
-    /* ── Tamper Test ──────────────────────────────────────────────────── */
-    function triggerTamper() {
-        if (!dom.tamperBtn) return;
-        dom.tamperBtn.disabled = true;
-        tamperArmed = true;
-        dom.tamperBtn.innerHTML = '<span class="hud-bracket">[</span> ARMING… <span class="hud-bracket">]</span>';
+    /* ── Tamper Test (Data or Timestamp) ──────────────────────────────── */
+    function triggerTamper(mode) {
+        mode = mode || "data";
+        const btn = (mode === "timestamp") ? dom.tamperTimeBtn : dom.tamperBtn;
+        if (!btn) return;
 
-        fetch(API_BASE + "/tamper", { method: "POST" })
+        btn.disabled = true;
+        tamperArmed = mode;
+        const originalText = (mode === "timestamp") ? "TAMPER TIMESTAMP" : "TAMPER DATA";
+        btn.innerHTML = '<span class="hud-bracket">[</span> ARMING… <span class="hud-bracket">]</span>';
+
+        fetch(API_BASE + "/tamper", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ type: mode }),
+        })
             .then(function (r) { return r.json(); })
             .then(function (result) {
-                dom.tamperBtn.innerHTML = '<span class="hud-bracket">[</span> TAMPER ARMED — AWAITING NEXT FRAME <span class="hud-bracket">]</span>';
+                btn.innerHTML = `<span class="hud-bracket">[</span> ${mode.toUpperCase()} ARMED — AWAITING FRAME <span class="hud-bracket">]</span>`;
 
                 /* If no violation detected within 8s, reset button */
                 setTimeout(function () {
-                    if (tamperArmed) {
-                        tamperArmed = false;
-                        dom.tamperBtn.disabled = false;
-                        dom.tamperBtn.innerHTML = '<span class="hud-bracket">[</span> TAMPER TEST <span class="hud-bracket">]</span>';
+                    if (tamperArmed === mode) {
+                        tamperArmed = null;
+                        btn.disabled = false;
+                        btn.innerHTML = `<span class="hud-bracket">[</span> ${originalText} <span class="hud-bracket">]</span>`;
                     }
                 }, 8000);
             })
             .catch(function () {
-                tamperArmed = false;
-                dom.tamperBtn.disabled = false;
-                dom.tamperBtn.innerHTML = '<span class="hud-bracket">[</span> FAILED — RETRY <span class="hud-bracket">]</span>';
+                tamperArmed = null;
+                btn.disabled = false;
+                btn.innerHTML = '<span class="hud-bracket">[</span> FAILED — RETRY <span class="hud-bracket">]</span>';
                 setTimeout(function () {
-                    dom.tamperBtn.innerHTML = '<span class="hud-bracket">[</span> TAMPER TEST <span class="hud-bracket">]</span>';
+                    btn.innerHTML = `<span class="hud-bracket">[</span> ${originalText} <span class="hud-bracket">]</span>`;
                 }, 2000);
             });
     }

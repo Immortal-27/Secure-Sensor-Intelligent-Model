@@ -133,9 +133,14 @@
         <div class="integrity-section">
             <!-- Integrity Panel -->
             <div class="glass-card integrity-panel" id="integrity-panel">
-                <div class="section-title">Cryptographic Integrity Verification</div>
+                <div class="section-title">Cryptographic Integrity &amp; Freshness <span style="font-size: 0.65rem; color: #00e5ff; font-weight: normal; letter-spacing: 0.05em;">[ HMAC-SHA256(DATA || TIMESTAMP) ]</span></div>
 
                 <div class="hmac-display">
+                    <div class="hmac-row timestamp-row">
+                        <span class="hmac-label">[ SIGNED TIME ]</span>
+                        <span class="hmac-value timestamp-value" id="signed-timestamp">Awaiting telemetry…</span>
+                        <span class="sig-badge verified" id="time-verified-badge">[ BOUND IN HMAC ]</span>
+                    </div>
                     <div class="hmac-row">
                         <span class="hmac-label">[ TRANSMITTED ]</span>
                         <span class="hmac-value" id="hmac-original">Awaiting data…</span>
@@ -154,8 +159,11 @@
                     <div class="integrity-badge verified" id="integrity-badge">
                         [ ✓ VERIFIED ]
                     </div>
-                    <button class="tamper-btn" id="tamper-btn" type="button">
-                        <span class="hud-bracket">[</span> TAMPER TEST <span class="hud-bracket">]</span>
+                    <button class="tamper-btn" id="tamper-btn" type="button" title="Corrupt sensor ciphertext in transit to test HMAC integrity">
+                        <span class="hud-bracket">[</span> TAMPER DATA <span class="hud-bracket">]</span>
+                    </button>
+                    <button class="tamper-btn time-tamper-btn" id="tamper-time-btn" type="button" title="Alter or replay timestamp to test signature tamper detection">
+                        <span class="hud-bracket">[</span> TAMPER TIMESTAMP <span class="hud-bracket">]</span>
                     </button>
                     <div class="integrity-counter">
                         <span class="hud-label">CHECKS:</span>

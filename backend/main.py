@@ -31,7 +31,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -105,6 +105,7 @@ start_time = time.time()
 packet_count = 0
 connected_clients: set[WebSocket] = set()
 tamper_next: bool = False
+tamper_mode: str = "data"
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -143,7 +144,7 @@ async def telemetry_loop():
     Background task: reads sensor frames, runs the full crypto pipeline,
     and broadcasts results to all connected WebSocket clients.
     """
-    global latest_frame, frame_log, packet_count, tamper_next, bridge
+    global latest_frame, frame_log, packet_count, tamper_next, tamper_mode, bridge
 
     interval = FRAME_INTERVAL_MS / 1000.0
 
@@ -167,13 +168,27 @@ async def telemetry_loop():
             pid = raw_frame.get("pid", packet_count + 1)
             scenario = raw_frame.get("scenario", "UNKNOWN")
 
+            # Timestamp generated at transmission time and bound into cryptographic HMAC signature
+            frame_timestamp = datetime.now(timezone.utc).isoformat()
+
             # Run crypto pipeline with appropriate quantization thresholds
             active_thresholds = HARDWARE_THRESHOLDS if bridge.is_hardware else THRESHOLDS
             if tamper_next:
-                result = process_frame_tampered(raw_values, pad, thresholds=active_thresholds)
+                result = process_frame_tampered(
+                    raw_values,
+                    pad,
+                    timestamp=frame_timestamp,
+                    tamper_type=tamper_mode,
+                    thresholds=active_thresholds,
+                )
                 tamper_next = False
             else:
-                result = process_frame(raw_values, pad, thresholds=active_thresholds)
+                result = process_frame(
+                    raw_values,
+                    pad,
+                    timestamp=frame_timestamp,
+                    thresholds=active_thresholds,
+                )
 
             # Record entropy
             entropy_analyzer.record(pad)
@@ -185,7 +200,10 @@ async def telemetry_loop():
             # Build full telemetry payload
             packet_count += 1
             payload = {
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": result["timestamp"],
+                "signed_timestamp": result.get("signed_timestamp", result["timestamp"]),
+                "timestamp_bound": True,
+                "signature_algo": "HMAC-SHA256(Quantized||Timestamp)",
                 "packet_id": pid,
                 "source": bridge.source,
                 "is_hardware": bridge.is_hardware,
@@ -207,8 +225,13 @@ async def telemetry_loop():
             }
 
             # Add tamper info if present
+            if "tamper_type" in result:
+                payload["tamper_type"] = result["tamper_type"]
             if "tampered_channel" in result:
                 payload["tampered_channel"] = result["tampered_channel"]
+            if "tampered_timestamp" in result:
+                payload["tampered_timestamp"] = result["tampered_timestamp"]
+            if "ciphertext_original" in result:
                 payload["ciphertext_original"] = result.get("ciphertext_original")
 
             latest_frame = payload
@@ -293,17 +316,28 @@ async def get_log():
 
 
 @app.post("/api/tamper")
-async def trigger_tamper():
+async def trigger_tamper(request: Request = None):
     """
-    Flag the next frame for deliberate ciphertext corruption to
-    demonstrate HMAC integrity failure in real-time.
+    Flag the next frame for deliberate corruption (ciphertext or timestamp) to
+    demonstrate HMAC integrity failure and verify tamper in real-time.
+    Accepts JSON body: {"type": "data"} or {"type": "timestamp"}.
     """
-    global tamper_next
+    global tamper_next, tamper_mode
+    tamper_mode = "data"
+    if request:
+        try:
+            body = await request.json()
+            if isinstance(body, dict) and body.get("type") in ("timestamp", "data"):
+                tamper_mode = body.get("type")
+        except Exception:
+            pass
+
     tamper_next = True
-    logger.warning("[TAMPER TEST] Next frame will have corrupted ciphertext")
+    logger.warning(f"[TAMPER TEST] Next frame will be tampered (mode={tamper_mode})")
     return JSONResponse({
         "status": "tamper_armed",
-        "message": "Next telemetry frame will have corrupted ciphertext to demonstrate HMAC integrity failure.",
+        "tamper_mode": tamper_mode,
+        "message": f"Next telemetry frame will have corrupted {tamper_mode} to demonstrate HMAC signature integrity failure.",
     })
 
 
