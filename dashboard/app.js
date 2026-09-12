@@ -30,11 +30,14 @@
     let entropyFetchPending = false;
 
     let activeLabels = [
-        "Temperature", "Humidity", "Pressure", "Light",
-        "CO₂", "Vibration", "Voltage", "Current"
+        "Temperature", "Distance", "MQ3 Alcohol", "MQ135 Air Qlt",
+        "MQ9 CO/Gas", "MQ5 LPG Gas", "Acceleration", "Tilt Angle",
+        "Lat / Lon GPS", "Atmos Pressure"
     ];
-    let activeUnits = ["°C", "%RH", "hPa", "lux", "ppm", "g", "V", "A"];
+    let activeUnits = ["°C", "cm", "ADC", "ADC", "ADC", "ADC", "g", "°", "°N,°E", "hPa"];
     let isHardwareActive = false;
+    let geoWeatherData = null;
+    let geoWeatherInterval = null;
 
     /* Integrity tracking */
     let integrityCheckCount = 0;
@@ -109,6 +112,13 @@
             dom.tamperTimeBtn.addEventListener("click", function () {
                 triggerTamper("timestamp");
             });
+        }
+
+        /* Regular API calls for Geolocation (Lat/Lon) and Atmospheric Pressure */
+        requestBrowserGps();
+        fetchGeoWeatherAPI();
+        if (!geoWeatherInterval) {
+            geoWeatherInterval = setInterval(fetchGeoWeatherAPI, 15000);
         }
     }
 
@@ -359,19 +369,26 @@
     /* ── Channel Cards ────────────────────────────────────────────────── */
     function buildChannelCards() {
         dom.channelGrid.innerHTML = "";
-        for (let i = 0; i < 8; i++) {
+        for (let i = 0; i < 10; i++) {
             sparklineData[i] = { raw: [], prevVal: null };
             const card = document.createElement("div");
-            card.className = "glass-card channel-card fade-in";
-            card.style.animationDelay = `${i * 30}ms`;
+            card.className = "glass-card channel-card fade-in" + (i >= 8 ? " api-topic-card" : "");
+            card.style.animationDelay = `${i * 25}ms`;
             card.id = `channel-${i}`;
-            const label = (activeLabels[i] || `CH 0${i + 1}`).toUpperCase();
+            const label = (activeLabels[i] || `CH ${(i + 1 < 10 ? "0" : "") + (i + 1)}`).toUpperCase();
+            const numStr = (i + 1 < 10 ? "0" : "") + (i + 1);
+            const isApi = i >= 8;
+            const apiBadge = isApi
+                ? `<span class="api-topic-badge" id="ch-api-badge-${i}">[ REGULAR API ]</span>`
+                : "";
+
             card.innerHTML = `
                 <div class="channel-header">
                     <span class="channel-name" id="ch-title-${i}">
-                        <span class="hud-bracket">[</span> ▪ 0${i + 1} : ${label} <span class="hud-bracket">]</span>
+                        <span class="hud-bracket">[</span> ▪ ${numStr} : ${label} <span class="hud-bracket">]</span>
                     </span>
                     <div class="channel-header-right">
+                        ${apiBadge}
                         <span class="channel-trend neutral" id="ch-trend-${i}">▪ 0.00</span>
                         <span class="channel-status-dot" id="ch-dot-${i}"></span>
                     </div>
@@ -399,22 +416,23 @@
     function updateChannelLabels(newLabels, newUnits) {
         if (!newLabels || !Array.isArray(newLabels)) return;
         let changed = false;
-        for (let i = 0; i < Math.min(newLabels.length, 8); i++) {
+        for (let i = 0; i < Math.min(newLabels.length, 10); i++) {
             if (activeLabels[i] !== newLabels[i]) {
                 activeLabels[i] = newLabels[i];
                 changed = true;
             }
         }
         if (newUnits && Array.isArray(newUnits)) {
-            for (let i = 0; i < Math.min(newUnits.length, 8); i++) {
+            for (let i = 0; i < Math.min(newUnits.length, 10); i++) {
                 activeUnits[i] = newUnits[i];
             }
         }
         if (changed) {
-            for (let i = 0; i < 8; i++) {
+            for (let i = 0; i < 10; i++) {
                 const titleEl = document.getElementById(`ch-title-${i}`);
                 if (titleEl) {
-                    titleEl.innerHTML = `<span class="hud-bracket">[</span> ▪ 0${i + 1} : ${activeLabels[i].toUpperCase()} <span class="hud-bracket">]</span>`;
+                    const numStr = (i + 1 < 10 ? "0" : "") + (i + 1);
+                    titleEl.innerHTML = `<span class="hud-bracket">[</span> ▪ ${numStr} : ${activeLabels[i].toUpperCase()} <span class="hud-bracket">]</span>`;
                 }
             }
         }
@@ -526,8 +544,14 @@
             updateChannelLabels(data.channel_labels, data.channel_units);
         }
 
-        /* Channel cards */
-        for (let i = 0; i < 8; i++) {
+        /* Store geo_weather if provided in payload */
+        if (data.geo_weather) {
+            geoWeatherData = data.geo_weather;
+            updateGeoWeatherBadges(data.geo_weather);
+        }
+
+        /* Channel cards (10 total: 8 physical/sim sensors + 2 regular API topics) */
+        for (let i = 0; i < 10; i++) {
             updateChannelCard(i, data);
         }
 
@@ -596,12 +620,35 @@
                 /* Show descriptive failure text for broken sensors */
                 rawEl.textContent = "SENSOR N/A";
                 rawEl.style.color = "#f87171";
-            } else if (data.is_hardware && i === 2 && raw === 0.0) {
+            } else if (data.is_hardware && i === 1 && raw === 0.0) {
                 /* HC-SR04: 0.00 means no echo received */
-                rawEl.textContent = "0.00 cm (no echo)";
+                rawEl.textContent = "0.0 cm (no echo)";
                 rawEl.style.color = "#fbbf24";
+            } else if (i === 8) {
+                /* Channel 9: Latitude & Longitude (Regular API) */
+                const gw = data.geo_weather || geoWeatherData;
+                const latVal = typeof raw === "number" ? raw : (gw && (gw.live_latitude || gw.latitude) ? (gw.live_latitude || gw.latitude) : 0.0);
+                const lonVal = (gw && (gw.live_longitude || gw.longitude)) ? (gw.live_longitude || gw.longitude) : 0.0;
+                const latDir = latVal >= 0 ? "N" : "S";
+                const lonDir = lonVal >= 0 ? "E" : "W";
+                const locStr = (gw && gw.location_formatted && gw.location_formatted !== "Detecting...") ? gw.location_formatted : (gw && gw.city ? gw.city : "GPS LOCK");
+                rawEl.innerHTML = `<span class="coord-primary">${Math.abs(latVal).toFixed(4)}° ${latDir}, ${Math.abs(lonVal).toFixed(4)}° ${lonDir}</span><span class="coord-loc">[ ${locStr} ]</span>`;
+                rawEl.style.color = "";
+            } else if (i === 9) {
+                /* Channel 10: Atmospheric Pressure (Regular API) */
+                const gw = data.geo_weather || geoWeatherData;
+                const pressVal = typeof raw === "number" ? raw : (gw && gw.surface_pressure_hpa ? gw.surface_pressure_hpa : 1013.25);
+                const mslVal = (gw && gw.pressure_msl_hpa) ? gw.pressure_msl_hpa : pressVal;
+                rawEl.innerHTML = `<span class="pressure-primary">${pressVal.toFixed(2)} hPa</span><span class="pressure-sec">[ MSL: ${mslVal.toFixed(1)} hPa ]</span>`;
+                rawEl.style.color = "";
             } else {
-                const decimals = (unit === "ADC" || Math.abs(raw) >= 100) ? 1 : 2;
+                let decimals = 1;
+                if (unit === "ADC") decimals = 0;
+                else if (unit === "g") decimals = 3;
+                else if (unit === "°") decimals = 1;
+                else if (unit === "°C") decimals = 1;
+                else if (unit === "cm") decimals = 1;
+                else if (Math.abs(raw) >= 100) decimals = 1;
                 rawEl.textContent = `${raw.toFixed(decimals)} ${unit}`;
                 rawEl.style.color = "";
             }
@@ -913,7 +960,28 @@
             if (data[i] < min) min = data[i];
             if (data[i] > max) max = data[i];
         }
-        const range = max - min || 1;
+        let range = max - min;
+
+        /* Minimum vertical range per channel to avoid auto-scaling micro-noise into huge waves */
+        const minSpans = {
+            0: 2.0,   // Temperature (°C)
+            1: 15.0,  // Distance (cm)
+            2: 50.0,  // MQ3 (ADC)
+            3: 50.0,  // MQ135 (ADC)
+            4: 50.0,  // MQ9 (ADC)
+            5: 50.0,  // MQ5 (ADC)
+            6: 0.05,  // Acceleration (g) — sensitive to physical taps and movement
+            7: 10.0,  // Tilt (°)
+            8: 0.1,   // GPS Coordinates (°) — keeps stationary GPS line steady
+            9: 2.0,   // Atmos Pressure (hPa)
+        };
+        const minSpan = minSpans[channelIdx] !== undefined ? minSpans[channelIdx] : 1.0;
+        if (range < minSpan) {
+            const mid = (min + max) / 2;
+            min = mid - minSpan / 2;
+            max = mid + minSpan / 2;
+            range = minSpan;
+        }
         const padding = 4;
 
         /* Gradient fill */
@@ -1054,13 +1122,43 @@
             `<td>${ts}</td>` +
             `<td>#${pid}</td>` +
             `<td class="reading-tag">${summary}</td>` +
-            `<td class="cipher-tag">8 Channels Encrypted (Z₂₅₇)</td>` +
+            `<td class="cipher-tag">10 Channels Encrypted (Z₂₅₇)</td>` +
             `<td class="${integrityClass}">[ ${integrity} ]</td>`;
 
         tbody.insertBefore(row, tbody.firstChild);
 
         while (tbody.children.length > MAX_LOG) {
             tbody.removeChild(tbody.lastChild);
+        }
+    }
+
+    /* ── Regular GeoWeather API Polling ────────────────────────────────── */
+    function fetchGeoWeatherAPI() {
+        fetch(API_BASE + "/geo_weather")
+            .then(function (r) {
+                if (!r.ok) throw new Error("HTTP " + r.status);
+                return r.json();
+            })
+            .then(function (gw) {
+                geoWeatherData = gw;
+                updateGeoWeatherBadges(gw);
+            })
+            .catch(function (err) {
+                console.warn("Regular GeoWeather API call error:", err);
+            });
+    }
+
+    function updateGeoWeatherBadges(gw) {
+        if (!gw) return;
+        const b8 = document.getElementById("ch-api-badge-8");
+        const b9 = document.getElementById("ch-api-badge-9");
+        if (b8) {
+            const locName = (gw.city && gw.city !== "Unknown" && gw.city !== "Detecting...") ? gw.city.toUpperCase() : (gw.source_geo || "GEO");
+            b8.textContent = `[ ${locName}: 200 OK ]`;
+        }
+        if (b9) {
+            const src = gw.source_weather ? gw.source_weather.replace(" API", "").toUpperCase() : "METEO";
+            b9.textContent = `[ ${src}: 200 OK ]`;
         }
     }
 

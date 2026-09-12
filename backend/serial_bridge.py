@@ -153,11 +153,16 @@ class HardwareSerialReader:
                 self.port,
                 self.baud,
                 timeout=SERIAL_TIMEOUT,
+                dsrdtr=False,
+                rtscts=False,
             )
+            # Ensure ESP32 is running (not in reset/bootloader mode)
+            self._serial.dtr = False
+            self._serial.rts = False
             # Flush startup garbage
             self._serial.reset_input_buffer()
             self.last_seen = time.time()
-            logger.info(f"✓ HardwareSerialReader connected to {self.port} at {self.baud} baud")
+            logger.info(f"✓ HardwareSerialReader connected to {self.port} at {self.baud} baud (DTR=0, RTS=0)")
             return True
         except Exception as exc:
             logger.error(f"Failed to open {self.port}: {exc}")
@@ -187,12 +192,37 @@ class HardwareSerialReader:
 
                 self.last_seen = time.time()
 
-                # Case 1: JSON frame
+                # Case 1: JSON frame from firmware/esp32_sensor.ino
+                # e.g.: {"mq3":965,"mq135":571,"mq9":305,"mq5":1841,"current":0,"temperature":30,"hcsr04":63.172,"acceleration":0.968689,"rotation":109.3303}
                 if line.startswith("{") and line.endswith("}"):
                     try:
                         data = json.loads(line)
-                        if "v" in data and isinstance(data["v"], list) and len(data["v"]) >= NUM_CHANNELS:
-                            raw_vals = [float(x) for x in data["v"][:NUM_CHANNELS]]
+                        if any(k in data for k in ("mq3", "temperature", "hcsr04", "acceleration")):
+                            temp = float(data.get("temperature", 0.0))
+                            dist = float(data.get("hcsr04", 0.0))
+                            mq3 = float(data.get("mq3", 0.0))
+                            mq135 = float(data.get("mq135", 0.0))
+                            mq9 = float(data.get("mq9", 0.0))
+                            mq5 = float(data.get("mq5", 0.0))
+                            accel = float(data.get("acceleration", 0.0))
+                            tilt = float(data.get("rotation", 0.0))
+
+                            from geo_weather import geo_weather_provider
+                            live_lat, live_lon, live_pressure = geo_weather_provider.get_realtime_readings()
+
+                            raw_vals = [
+                                round(temp, 1),
+                                round(dist, 1),
+                                round(mq3, 0),
+                                round(mq135, 0),
+                                round(mq9, 0),
+                                round(mq5, 0),
+                                round(accel, 3),
+                                round(tilt, 1),
+                                round(live_lat, 4),
+                                round(live_pressure, 2),
+                            ]
+
                             pad = data.get("pad")
                             if not pad or len(pad) < NUM_CHANNELS:
                                 pad = [b % N for b in os.urandom(NUM_CHANNELS)]
@@ -205,7 +235,30 @@ class HardwareSerialReader:
                                 "v": raw_vals,
                                 "pad": pad,
                                 "pid": data.get("pid", self._packet_id),
-                                "scenario": "ESP32_JSON",
+                                "scenario": "ESP32_PHYSICAL",
+                            }
+                            self._last_valid_frame = frame
+                            return frame
+
+                        elif "v" in data and isinstance(data["v"], list) and len(data["v"]) >= 8:
+                            from geo_weather import geo_weather_provider
+                            live_lat, live_lon, live_pressure = geo_weather_provider.get_realtime_readings()
+                            raw_vals = [float(x) for x in data["v"][:8]]
+                            raw_vals.append(round(live_lat, 4))
+                            raw_vals.append(round(live_pressure, 2))
+                            pad = data.get("pad")
+                            if not pad or len(pad) < NUM_CHANNELS:
+                                pad = [b % N for b in os.urandom(NUM_CHANNELS)]
+                            else:
+                                pad = [int(p) % N for p in pad[:NUM_CHANNELS]]
+
+                            self._packet_id += 1
+                            self.packets_read += 1
+                            frame = {
+                                "v": raw_vals,
+                                "pad": pad,
+                                "pid": data.get("pid", self._packet_id),
+                                "scenario": "ESP32_PHYSICAL",
                             }
                             self._last_valid_frame = frame
                             return frame
@@ -325,6 +378,12 @@ class HardwareSerialReader:
             v = self._accumulated[key]
             return round(v, decimals) if v > -900 else 0.0
 
+        # Fetch live coordinates & atmospheric pressure from GeoWeatherProvider
+        from geo_weather import geo_weather_provider
+        live_lat, live_lon, live_pressure = geo_weather_provider.get_realtime_readings()
+        lat_val = round(live_lat, 4)
+        press_val = round(live_pressure, 2)
+
         values = [
             _safe("temp", 2),
             _safe("hum", 2),
@@ -334,6 +393,8 @@ class HardwareSerialReader:
             _safe("mq9", 1),
             _safe("mq5", 1),
             _safe("bus", 2),
+            lat_val,
+            press_val,
         ]
 
         pad = [b % N for b in os.urandom(NUM_CHANNELS)]
@@ -455,14 +516,18 @@ class SensorBridge:
             frame = self._hardware.read_frame()
             if frame:
                 return frame
-            # If hardware was disconnected or timed out for > 8 seconds
-            if time.time() - self._hardware.last_seen > 8.0:
-                logger.warning(f"No data received from {self.active_port} for 8s — falling back to simulator")
+            # If hardware was disconnected or timed out for > 10 seconds
+            if time.time() - self._hardware.last_seen > 10.0:
+                logger.warning(f"No data received from {self.active_port} for 10s — falling back to simulator")
                 self.disconnect()
                 return self._simulator.generate_reading()
 
+            # When hardware is active, keep returning the latest physical hardware frame
+            # Never overwrite with mock simulator data!
             if self._hardware._last_valid_frame:
                 return self._hardware._last_valid_frame
+
+            return None
 
         return self._simulator.generate_reading()
 

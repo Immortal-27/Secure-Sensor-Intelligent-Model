@@ -539,32 +539,33 @@ def test_crypto_core() -> None:
 
     # --- Full pipeline ---
     print("\n[5/6] Full pipeline (process_frame with timestamp signature)...")
-    raw = [25.0, 55.0, 1010.0, 300.0, 500.0, 0.3, 2.0, 0.8]
-    pad_vals = [42, 99, 200, 155, 33, 128, 77, 201]
+    raw = [25.0, 55.0, 1010.0, 300.0, 500.0, 0.3, 2.0, 0.8, 22.56, 1010.8]
+    pad_vals = [42, 99, 200, 155, 33, 128, 77, 201, 14, 88]
     result = process_frame(raw, pad_vals, timestamp=ts1)
     assert result["integrity"] == "VERIFIED", "Pipeline integrity check failed"
     assert result["quantized"] == result["decrypted"], "Pipeline recovery failed"
+    assert len(result["quantized"]) == 10, "10-channel quantization failed"
     assert result["timestamp"] == ts1, "Timestamp mismatch"
     assert result["signed_timestamp"] == ts1, "Signed timestamp mismatch"
     print(f"    Signed Timestamp: {result['signed_timestamp']}")
-    print(f"    Raw:        {result['raw_values']}")
+    print(f"    Raw (10 channels): {result['raw_values']}")
     print(f"    Quantized:  {result['quantized']}")
     print(f"    Ciphertext: {result['ciphertext']}")
     print(f"    Decrypted:  {result['decrypted']}")
     print(f"    Integrity:  {result['integrity']}")
-    print("    ✓ Full pipeline: VERIFIED with bound timestamp signature")
+    print("    ✓ Full pipeline: VERIFIED with bound timestamp signature across 10 channels")
 
     # --- Tamper detection (Data and Timestamp) ---
     print("\n[6/6] Tamper detection (data and timestamp forgery)...")
     # Data tamper
-    tampered_data_result = process_frame_tampered(raw, pad_vals, timestamp=ts1, tamper_channel=2, tamper_delta=13, tamper_type="data")
-    assert tampered_data_result["integrity"] == "INTEGRITY VIOLATION", "Data tamper not detected"
+    tampered_data_result = process_frame_tampered(raw, pad_vals, timestamp=ts1, tamper_channel=8, tamper_delta=13, tamper_type="data")
+    assert tampered_data_result["integrity"] == "INTEGRITY VIOLATION", "Data tamper on CH8 not detected"
     # Timestamp tamper / replay attack
     tampered_time_result = process_frame_tampered(raw, pad_vals, timestamp=ts1, tamper_type="timestamp")
     assert tampered_time_result["integrity"] == "INTEGRITY VIOLATION", "Timestamp tamper/replay not detected"
     print(f"    Data tamper:      {tampered_data_result['integrity']}")
     print(f"    Timestamp tamper: {tampered_time_result['integrity']} (replayed/altered timestamp rejected)")
-    print("    ✓ Tamper detection: both data and timestamp tampering correctly detected")
+    print("    ✓ Tamper detection: both data (CH8 Geo) and timestamp tampering correctly detected")
 
     print("\n" + "=" * 60)
     print("  ALL SELF-TESTS PASSED ✓")

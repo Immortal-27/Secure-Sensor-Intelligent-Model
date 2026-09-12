@@ -60,6 +60,7 @@ from crypto_core import (
     quantize_vector,
 )
 from serial_bridge import SensorBridge, sensor_stream, list_available_ports
+from geo_weather import geo_weather_provider
 
 # ═══════════════════════════════════════════════════════════════════════════
 # LOGGING
@@ -123,6 +124,7 @@ async def startup_event():
     logger.info(f"║  Modulus N: {N:<41d} ║")
     logger.info(f"║  Channels: {NUM_CHANNELS:<41d} ║")
     logger.info(f"╚══════════════════════════════════════════════════════╝")
+    asyncio.create_task(geo_weather_provider.start_background_loop())
     asyncio.create_task(telemetry_loop())
 
 
@@ -130,6 +132,7 @@ async def startup_event():
 async def shutdown_event():
     """Clean up resources."""
     global bridge
+    geo_weather_provider.stop()
     if bridge:
         bridge.close()
     logger.info("Server shutdown — resources cleaned up")
@@ -167,6 +170,13 @@ async def telemetry_loop():
             pad = raw_frame["pad"]
             pid = raw_frame.get("pid", packet_count + 1)
             scenario = raw_frame.get("scenario", "UNKNOWN")
+
+            # Real-time regular API telemetry: Ensure CH 8 (GPS Lat) & CH 9 (Atmos Pressure)
+            # strictly reflect live real-time API telemetry on every frame
+            live_lat, live_lon, live_pressure = geo_weather_provider.get_realtime_readings()
+            if len(raw_values) >= 10:
+                raw_values[8] = round(live_lat, 4)
+                raw_values[9] = round(live_pressure, 2)
 
             # Timestamp generated at transmission time and bound into cryptographic HMAC signature
             frame_timestamp = datetime.now(timezone.utc).isoformat()
@@ -219,6 +229,7 @@ async def telemetry_loop():
                 "entropy_metrics": entropy_analyzer.get_metrics(),
                 "channel_labels": channel_labels,
                 "channel_units": channel_units,
+                "geo_weather": geo_weather_provider.get_data(),
                 "hardware_status": bridge.get_hardware_info(),
                 "uptime_seconds": round(time.time() - start_time, 1),
                 "disclaimer": DISCLAIMER,
@@ -298,6 +309,54 @@ async def get_latest():
             status_code=503,
         )
     return JSONResponse(latest_frame)
+
+
+@app.get("/api/geo_weather")
+async def get_geo_weather():
+    """Live Geolocation and Atmospheric Pressure from regular API calls."""
+    return JSONResponse(geo_weather_provider.get_data())
+
+
+@app.post("/api/geo_weather/refresh")
+async def refresh_geo_weather(request: Request = None):
+    """Trigger an immediate live API refresh for geo & weather."""
+    reset_gps = False
+    if request:
+        try:
+            body = await request.json()
+            reset_gps = body.get("reset_gps", False)
+        except Exception:
+            pass
+    if reset_gps:
+        geo_weather_provider.reset_gps_lock()
+    else:
+        await asyncio.get_event_loop().run_in_executor(
+            None, geo_weather_provider.fetch_sync
+        )
+    return JSONResponse({
+        "success": True,
+        "data": geo_weather_provider.get_data(),
+    })
+
+
+@app.post("/api/geo_weather/client_location")
+async def update_client_location(request: Request):
+    """Update coordinates using browser's high-precision GPS Geolocation API."""
+    try:
+        body = await request.json()
+        lat = body.get("latitude")
+        lon = body.get("longitude")
+        acc = body.get("accuracy")
+        if lat is not None and lon is not None:
+            geo_weather_provider.update_from_client_gps(float(lat), float(lon), acc)
+            return JSONResponse({
+                "success": True,
+                "message": f"Updated live GPS to ({lat}, {lon})",
+                "data": geo_weather_provider.get_data(),
+            })
+    except Exception as e:
+        logger.error(f"Failed to update client location: {e}")
+    return JSONResponse({"success": False, "message": "Invalid request body"}, status_code=400)
 
 
 @app.get("/api/entropy")

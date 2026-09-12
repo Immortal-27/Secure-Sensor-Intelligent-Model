@@ -17,7 +17,7 @@ N: int = 257
 # ---------------------------------------------------------------------------
 # Channel Configuration
 # ---------------------------------------------------------------------------
-NUM_CHANNELS: int = 8
+NUM_CHANNELS: int = 10
 
 SENSOR_LABELS: list[str] = [
     "Temperature",   # °C
@@ -28,22 +28,26 @@ SENSOR_LABELS: list[str] = [
     "Vibration",     # g
     "Voltage",       # V
     "Current",       # A
+    "Lat / Lon GPS", # °N, °E (API)
+    "Atmos Pressure",# hPa (API)
 ]
 
-SIMULATOR_UNITS: list[str] = ["°C", "%RH", "hPa", "lux", "ppm", "g", "V", "A"]
+SIMULATOR_UNITS: list[str] = ["°C", "%RH", "hPa", "lux", "ppm", "g", "V", "A", "°N,°E", "hPa"]
 
 HARDWARE_LABELS: list[str] = [
     "Temperature",    # °C (DHT22)
-    "Humidity",       # %RH (DHT22)
     "Distance",       # cm (HC-SR04)
     "MQ3 Alcohol",    # ADC raw (0-4095)
     "MQ135 Air Qlt",  # ADC raw (0-4095)
     "MQ9 CO/Gas",     # ADC raw (0-4095)
     "MQ5 LPG Gas",    # ADC raw (0-4095)
-    "ESP32 Bus",      # 3.3V System
+    "Acceleration",   # g (MPU6050)
+    "Tilt Angle",     # ° (MPU6050)
+    "Lat / Lon GPS",  # °N, °E (API)
+    "Atmos Pressure", # hPa (API)
 ]
 
-HARDWARE_UNITS: list[str] = ["°C", "%RH", "cm", "ADC", "ADC", "ADC", "ADC", "V"]
+HARDWARE_UNITS: list[str] = ["°C", "cm", "ADC", "ADC", "ADC", "ADC", "g", "°", "°N,°E", "hPa"]
 
 # Quantization threshold arrays — bin edges per channel.
 # A reading in [thresholds[i], thresholds[i+1]) maps to state i.
@@ -65,13 +69,15 @@ THRESHOLDS: list[list[float]] = [
     [0.0, 1.0, 2.5, 3.6, 5.0],
     # Current (A): 5 bins → states 0..4
     [0.0, 0.5, 1.0, 2.0, 5.0],
+    # Lat / Lon Coordinate State (CH8): 7 bins → states 0..6
+    [0.0, 15.0, 30.0, 45.0, 60.0, 75.0, 90.0],
+    # Atmospheric Pressure (hPa, CH9): 7 bins → states 0..6
+    [950.0, 980.0, 1000.0, 1013.25, 1025.0, 1040.0, 1060.0],
 ]
 
 HARDWARE_THRESHOLDS: list[list[float]] = [
     # Temperature (°C)
     [0.0, 15.0, 25.0, 35.0, 50.0, 70.0, 100.0],
-    # Humidity (%RH)
-    [0.0, 20.0, 40.0, 60.0, 80.0, 100.0],
     # Distance (cm)
     [0.0, 10.0, 30.0, 60.0, 100.0, 200.0, 400.0],
     # MQ3 Alcohol (ADC)
@@ -82,8 +88,14 @@ HARDWARE_THRESHOLDS: list[list[float]] = [
     [0.0, 300.0, 600.0, 1000.0, 1800.0, 2800.0, 4095.0],
     # MQ5 LPG (ADC)
     [0.0, 300.0, 600.0, 1000.0, 1800.0, 2800.0, 4095.0],
-    # ESP32 Bus (V)
-    [0.0, 1.0, 2.5, 3.2, 3.6, 5.0],
+    # Acceleration (g)
+    [0.0, 0.5, 0.9, 1.2, 2.0, 4.0],
+    # Tilt Angle (°)
+    [0.0, 15.0, 45.0, 90.0, 135.0, 180.0],
+    # Lat / Lon Coordinate State (CH8)
+    [0.0, 15.0, 30.0, 45.0, 60.0, 75.0, 90.0],
+    # Atmospheric Pressure (hPa, CH9)
+    [950.0, 980.0, 1000.0, 1013.25, 1025.0, 1040.0, 1060.0],
 ]
 
 # ---------------------------------------------------------------------------
@@ -120,6 +132,8 @@ SENSOR_RANGES: list[tuple[float, float]] = [
     (0.0, 4.0),         # Vibration g
     (0.0, 4.5),         # Voltage V
     (0.0, 4.0),         # Current A
+    (-90.0, 90.0),      # Latitude / Coordinate °
+    (900.0, 1100.0),    # Atmospheric Pressure hPa
 ]
 
 # ---------------------------------------------------------------------------

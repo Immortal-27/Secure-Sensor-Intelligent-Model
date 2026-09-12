@@ -634,9 +634,55 @@ body::before {
 /* ── Channel Grid ─────────────────────────────────────────────────────── */
 .channel-grid {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(5, 1fr);
     gap: 10px;
     margin-bottom: 12px;
+}
+
+@media (max-width: 1400px) {
+    .channel-grid {
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    }
+}
+
+.api-topic-badge {
+    font-size: 0.58rem;
+    font-weight: 700;
+    color: #00e5ff;
+    background: rgba(0, 229, 255, 0.1);
+    border: 1px solid rgba(0, 229, 255, 0.3);
+    padding: 1px 5px;
+    border-radius: 3px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.coord-primary {
+    display: block;
+    color: #00e5ff;
+    font-weight: 700;
+    font-size: 0.72rem;
+}
+
+.coord-loc {
+    display: block;
+    font-size: 0.62rem;
+    color: var(--text-muted);
+    letter-spacing: 0.04em;
+}
+
+.pressure-primary {
+    display: block;
+    color: #38bdf8;
+    font-weight: 700;
+    font-size: 0.74rem;
+}
+
+.pressure-sec {
+    display: block;
+    font-size: 0.62rem;
+    color: var(--text-muted);
+    letter-spacing: 0.04em;
 }
 
 .channel-card {

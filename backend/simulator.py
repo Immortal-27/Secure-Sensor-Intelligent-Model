@@ -44,18 +44,18 @@ class Scenario:
 SCENARIOS = [
     Scenario(
         name="NOMINAL",
-        centers=[22.0, 45.0, 1013.0, 350.0, 420.0, 0.2, 3.3, 0.5],
-        noise_scales=[1.5, 3.0, 2.0, 30.0, 15.0, 0.05, 0.1, 0.05],
+        centers=[22.0, 45.0, 1013.0, 350.0, 420.0, 0.2, 3.3, 0.5, 0.0, 0.0],
+        noise_scales=[1.5, 3.0, 2.0, 30.0, 15.0, 0.05, 0.1, 0.05, 0.01, 0.2],
     ),
     Scenario(
         name="WARNING",
-        centers=[38.0, 72.0, 995.0, 800.0, 950.0, 1.2, 3.8, 1.5],
-        noise_scales=[3.0, 5.0, 4.0, 80.0, 50.0, 0.2, 0.15, 0.2],
+        centers=[38.0, 72.0, 995.0, 800.0, 950.0, 1.2, 3.8, 1.5, 0.0, 0.0],
+        noise_scales=[3.0, 5.0, 4.0, 80.0, 50.0, 0.2, 0.15, 0.2, 0.01, 0.3],
     ),
     Scenario(
         name="CRITICAL",
-        centers=[65.0, 90.0, 968.0, 6500.0, 3200.0, 3.5, 1.0, 3.8],
-        noise_scales=[5.0, 4.0, 6.0, 500.0, 200.0, 0.5, 0.3, 0.3],
+        centers=[65.0, 90.0, 968.0, 6500.0, 3200.0, 3.5, 1.0, 3.8, 0.0, 0.0],
+        noise_scales=[5.0, 4.0, 6.0, 500.0, 200.0, 0.5, 0.3, 0.3, 0.02, 0.5],
     ),
 ]
 
@@ -151,6 +151,17 @@ class VirtualSensorGenerator:
             lo, hi = SENSOR_RANGES[ch]
             value = max(lo, min(hi, center + drift + noise))
             values.append(round(value, 2))
+
+        # Real-time regular API topics: Channel 8 (GPS Lat) & Channel 9 (Atmos Pressure)
+        # Driven dynamically by live REST APIs (Open-Meteo & IP/GPS Geolocation)
+        try:
+            from geo_weather import geo_weather_provider
+            live_lat, live_lon, live_pressure = geo_weather_provider.get_realtime_readings()
+            if len(values) >= 10:
+                values[8] = round(live_lat, 4)
+                values[9] = round(live_pressure, 2)
+        except Exception:
+            pass
 
         # Generate pad bytes via CSPRNG (os.urandom) — simulated entropy
         pad_bytes = list(os.urandom(NUM_CHANNELS))
