@@ -123,16 +123,20 @@ class HardwareSerialReader:
         self.last_seen = 0.0
 
         # Accumulated sensor state from esp32_otp_sensor.ino
+        # Initialize with sentinel -999 so we never show stale defaults
+        # as if they were real readings. -999 is replaced with 0.0 in
+        # _build_hardware_frame until a real value arrives.
         self._accumulated = {
-            "temp": 25.0,
-            "hum": 50.0,
-            "dist": 30.0,
-            "mq3": 400.0,
-            "mq135": 300.0,
-            "mq9": 200.0,
-            "mq5": 250.0,
-            "bus": 3.30,
+            "temp": -999.0,
+            "hum": -999.0,
+            "dist": -999.0,
+            "mq3": -999.0,
+            "mq135": -999.0,
+            "mq9": -999.0,
+            "mq5": -999.0,
+            "bus": 3.30,     # ESP32 bus is always 3.3 V
         }
+        self._dht_ok = False   # Track whether DHT22 is reporting valid data
         self._last_valid_frame: Optional[dict] = None
         self._packet_id = 0
         self._items_in_current_burst = 0
@@ -263,11 +267,11 @@ class HardwareSerialReader:
                 self._accumulated["mq5"] = val
             return True
 
-        # Distance: <val> cm
+        # Distance: <val> cm — accept 0.0 (HC-SR04 returns 0 when no echo)
         m = re.search(r"Distance\s*:\s*([\d\.]+)", line_clean, re.IGNORECASE)
         if m:
             val = float(m.group(1))
-            if 1.0 <= val <= 500.0:
+            if 0.0 <= val <= 500.0:
                 self._accumulated["dist"] = val
             return True
 
@@ -278,8 +282,17 @@ class HardwareSerialReader:
             temp = float(m.group(2))
             if 0.0 <= hum <= 100.0:
                 self._accumulated["hum"] = hum
+                self._dht_ok = True
             if -40.0 <= temp <= 125.0:
                 self._accumulated["temp"] = temp
+                self._dht_ok = True
+            return True
+
+        # DHT22 failure: "Failed to read from DHT sensor!"
+        # Count this as a parsed item so burst timing stays correct
+        if "failed to read from dht" in line_clean.lower():
+            self._dht_ok = False
+            logger.debug("DHT22 sensor read failure reported by ESP32")
             return True
 
         # Single Temp line
@@ -288,6 +301,7 @@ class HardwareSerialReader:
             temp = float(m.group(1))
             if -40.0 <= temp <= 125.0:
                 self._accumulated["temp"] = temp
+                self._dht_ok = True
             return True
 
         # Single Humidity line
@@ -296,6 +310,7 @@ class HardwareSerialReader:
             hum = float(m.group(1))
             if 0.0 <= hum <= 100.0:
                 self._accumulated["hum"] = hum
+                self._dht_ok = True
             return True
 
         return False
@@ -305,24 +320,34 @@ class HardwareSerialReader:
         self._packet_id += 1
         self.packets_read += 1
 
+        # Replace sentinel -999 with 0.0 ("no reading yet")
+        def _safe(key, decimals=2):
+            v = self._accumulated[key]
+            return round(v, decimals) if v > -900 else 0.0
+
         values = [
-            round(self._accumulated["temp"], 2),
-            round(self._accumulated["hum"], 2),
-            round(self._accumulated["dist"], 2),
-            round(self._accumulated["mq3"], 1),
-            round(self._accumulated["mq135"], 1),
-            round(self._accumulated["mq9"], 1),
-            round(self._accumulated["mq5"], 1),
-            round(self._accumulated["bus"], 2),
+            _safe("temp", 2),
+            _safe("hum", 2),
+            _safe("dist", 2),
+            _safe("mq3", 1),
+            _safe("mq135", 1),
+            _safe("mq9", 1),
+            _safe("mq5", 1),
+            _safe("bus", 2),
         ]
 
         pad = [b % N for b in os.urandom(NUM_CHANNELS)]
+
+        # Indicate DHT22 health in the scenario tag
+        scenario = "ESP32_PHYSICAL"
+        if not self._dht_ok:
+            scenario = "ESP32_PHYSICAL (DHT22 FAIL)"
 
         frame = {
             "v": values,
             "pad": pad,
             "pid": self._packet_id,
-            "scenario": "ESP32_PHYSICAL",
+            "scenario": scenario,
         }
         self._last_valid_frame = frame
         return frame

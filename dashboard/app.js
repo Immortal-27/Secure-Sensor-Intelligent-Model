@@ -499,6 +499,18 @@
             syncHardwareStateUI(data.hardware_status);
         }
 
+        /* Detect DHT22 failure from scenario tag */
+        const scenario = data.scenario || "";
+        if (data.is_hardware && scenario.indexOf("DHT22 FAIL") !== -1) {
+            if (dom.espConsoleMsg && !dom.espConsoleMsg._dhtWarnShown) {
+                setEspConsole("⚠ DHT22 sensor failure — check wiring (data pin + 10kΩ pull-up). MQ & distance sensors active.", true);
+                dom.espConsoleMsg._dhtWarnShown = true;
+            }
+        } else if (data.is_hardware && dom.espConsoleMsg && dom.espConsoleMsg._dhtWarnShown) {
+            setEspConsole("✓ All sensors reporting — hardware streaming live.", false);
+            dom.espConsoleMsg._dhtWarnShown = false;
+        }
+
         /* Dynamic labels / units */
         if (data.channel_labels) {
             updateChannelLabels(data.channel_labels, data.channel_units);
@@ -530,6 +542,7 @@
         const cipherEl = document.getElementById(`ch-cipher-${i}`);
         const dotEl = document.getElementById(`ch-dot-${i}`);
         const trendEl = document.getElementById(`ch-trend-${i}`);
+        const card = document.getElementById(`channel-${i}`);
 
         if (!rawEl || !quantEl || !cipherEl) return;
 
@@ -546,23 +559,56 @@
             : null;
 
         const unit = activeUnits[i] || "";
+        const scenario = data.scenario || "";
+        const isDhtFail = data.is_hardware && scenario.indexOf("DHT22 FAIL") !== -1;
+
+        /* Detect sensor failure states in hardware mode */
+        let sensorFail = false;
+        if (data.is_hardware && raw === 0.0) {
+            /* CH0=Temperature, CH1=Humidity — DHT22 failure */
+            if ((i === 0 || i === 1) && isDhtFail) {
+                sensorFail = true;
+            }
+        }
+
+        /* Visual indicator on the channel card for sensor failures */
+        if (card) {
+            if (sensorFail) {
+                card.classList.add("sensor-fail");
+            } else {
+                card.classList.remove("sensor-fail");
+            }
+        }
 
         /* Format Raw Value cleanly */
         if (raw !== null) {
-            const decimals = (unit === "ADC" || Math.abs(raw) >= 100) ? 1 : 2;
-            rawEl.textContent = `${raw.toFixed(decimals)} ${unit}`;
+            if (sensorFail) {
+                /* Show descriptive failure text for broken sensors */
+                rawEl.textContent = "SENSOR N/A";
+                rawEl.style.color = "#f87171";
+            } else if (data.is_hardware && i === 2 && raw === 0.0) {
+                /* HC-SR04: 0.00 means no echo received */
+                rawEl.textContent = "0.00 cm (no echo)";
+                rawEl.style.color = "#fbbf24";
+            } else {
+                const decimals = (unit === "ADC" || Math.abs(raw) >= 100) ? 1 : 2;
+                rawEl.textContent = `${raw.toFixed(decimals)} ${unit}`;
+                rawEl.style.color = "";
+            }
             flashElement(rawEl);
 
             /* Dynamic Trend Calculation */
             if (sparklineData[i].prevVal !== null && trendEl) {
                 let delta = raw - sparklineData[i].prevVal;
                 if (!isFinite(delta) || Math.abs(delta) < 0.01) {
-                    trendEl.textContent = "▪ 0.00";
+                    trendEl.textContent = sensorFail ? "▪ N/A" : "▪ 0.00";
                     trendEl.className = "channel-trend neutral";
                 } else if (delta > 0) {
+                    const decimals = (unit === "ADC" || Math.abs(raw) >= 100) ? 1 : 2;
                     trendEl.textContent = `▲ +${delta.toFixed(decimals)}`;
                     trendEl.className = "channel-trend up";
                 } else {
+                    const decimals = (unit === "ADC" || Math.abs(raw) >= 100) ? 1 : 2;
                     trendEl.textContent = `▼ ${delta.toFixed(decimals)}`;
                     trendEl.className = "channel-trend down";
                 }
@@ -570,6 +616,7 @@
             sparklineData[i].prevVal = raw;
         } else {
             rawEl.textContent = "—";
+            rawEl.style.color = "";
         }
 
         /* Quantized */
@@ -585,12 +632,16 @@
 
         /* Status dot */
         if (dotEl) {
-            const isOk = data.integrity === "VERIFIED";
-            dotEl.className = "channel-status-dot" + (isOk ? "" : " fail");
+            if (sensorFail) {
+                dotEl.className = "channel-status-dot fail";
+            } else {
+                const isOk = data.integrity === "VERIFIED";
+                dotEl.className = "channel-status-dot" + (isOk ? "" : " fail");
+            }
         }
 
         /* Sparkline buffer & redraw */
-        if (raw !== null) {
+        if (raw !== null && !sensorFail) {
             sparklineData[i].raw.push(raw);
             if (sparklineData[i].raw.length > MAX_SPARKLINE_POINTS) {
                 sparklineData[i].raw.shift();

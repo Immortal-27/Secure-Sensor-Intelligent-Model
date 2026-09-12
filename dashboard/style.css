@@ -674,6 +674,24 @@ body::before {
     opacity: 1;
 }
 
+/* Sensor failure indicator — red pulsing border + top bar */
+.channel-card.sensor-fail {
+    border-color: rgba(239, 68, 68, 0.35);
+    box-shadow: 0 4px 20px rgba(239, 68, 68, 0.15),
+                inset 0 1px 0 rgba(239, 68, 68, 0.1);
+}
+
+.channel-card.sensor-fail::before {
+    background: linear-gradient(135deg, #ef4444 0%, #f97316 100%);
+    opacity: 0.8;
+    animation: sensorFailPulse 2s ease-in-out infinite;
+}
+
+@keyframes sensorFailPulse {
+    0%, 100% { opacity: 0.8; }
+    50%      { opacity: 0.3; }
+}
+
 .channel-header {
     display: flex;
     align-items: center;
