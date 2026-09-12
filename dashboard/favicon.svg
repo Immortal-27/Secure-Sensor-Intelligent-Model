@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <!-- Shield gradient: deep dark teal to near-black -->
+    <linearGradient id="shieldGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#0ff0fc" stop-opacity="0.95"/>
+      <stop offset="50%" stop-color="#0a3d5c" stop-opacity="0.98"/>
+      <stop offset="100%" stop-color="#060e18" stop-opacity="1"/>
+    </linearGradient>
+    <!-- Glow for the waveform -->
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="1.2" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <!-- Subtle inner shadow -->
+    <filter id="innerShadow">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="2" result="blur"/>
+      <feOffset dx="0" dy="1"/>
+      <feComposite in2="SourceAlpha" operator="arithmetic" k2="-1" k3="1"/>
+      <feFlood flood-color="#0ff0fc" flood-opacity="0.15"/>
+      <feComposite in2="SourceGraphic" operator="in"/>
+      <feMerge>
+        <feMergeNode/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Shield shape -->
+  <path d="M32 2 L58 14 L58 30 C58 46 46 56 32 62 C18 56 6 46 6 30 L6 14 Z"
+        fill="url(#shieldGrad)" stroke="#0ff0fc" stroke-width="1.5" stroke-opacity="0.7"
+        filter="url(#innerShadow)"/>
+
+  <!-- Inner shield border accent -->
+  <path d="M32 6 L54 16 L54 30 C54 44 44 52 32 58 C20 52 10 44 10 30 L10 16 Z"
+        fill="none" stroke="#0ff0fc" stroke-width="0.5" stroke-opacity="0.25"/>
+
+  <!-- Entropy / OTP waveform (representing sensor data + Shannon entropy) -->
+  <polyline points="14,34 18,34 20,26 22,40 24,22 26,38 28,28 30,36 32,24 34,42 36,20 38,38 40,30 42,36 44,26 46,34 50,34"
+            fill="none" stroke="#0ff0fc" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"
+            filter="url(#glow)" opacity="0.9"/>
+
+  <!-- Lock body -->
+  <rect x="26" y="42" width="12" height="9" rx="1.5" fill="#0a2a3f" stroke="#0ff0fc" stroke-width="1" stroke-opacity="0.8"/>
+
+  <!-- Lock shackle -->
+  <path d="M29 42 L29 38 C29 35 35 35 35 38 L35 42"
+        fill="none" stroke="#0ff0fc" stroke-width="1.2" stroke-linecap="round" stroke-opacity="0.8"/>
+
+  <!-- Lock keyhole -->
+  <circle cx="32" cy="46" r="1.5" fill="#0ff0fc" opacity="0.9"/>
+  <rect x="31.4" y="46" width="1.2" height="2.5" rx="0.4" fill="#0ff0fc" opacity="0.9"/>
+</svg>

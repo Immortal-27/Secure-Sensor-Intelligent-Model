@@ -1,39 +1,85 @@
-# Quantum-Resilient IoT Telemetry Pipeline
+<p align="center">
+  <img src="dashboard/favicon.svg" alt="Project Logo" width="80" height="80">
+</p>
 
-> **Information-Theoretic Security via Physical Entropy One-Time Pad (OTP)**
+<h1 align="center">Quantum-Resilient IoT Telemetry Pipeline</h1>
 
-A production-grade hackathon prototype demonstrating a quantum-resilient, algorithm-free telemetry security pipeline. Instead of relying on computational complexity (which quantum algorithms can target), this system achieves **Shannon-perfect secrecy** through One-Time Pad masking with true physical entropy from the ESP32 hardware TRNG.
+<p align="center">
+  <strong>Secure sensor data with physics, not algorithms.</strong><br>
+  Information-theoretic One-Time Pad encryption powered by hardware true random number generation.
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/python-3.10+-3776AB?logo=python&logoColor=white" alt="Python 3.10+">
+  <img src="https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white" alt="FastAPI">
+  <img src="https://img.shields.io/badge/ESP32-Hardware_TRNG-E7352C?logo=espressif&logoColor=white" alt="ESP32">
+  <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT License">
+</p>
 
 ---
 
-## ⚠️ Educational Disclaimer
+## What is This?
 
-This project is an **information-theoretic OTP demonstration** using physical entropy. It is **NOT** a replacement for production authenticated encryption standards (AES-GCM, ChaCha20-Poly1305). The pad is transmitted alongside ciphertext for educational and demonstration purposes only. In a real deployment, pad material would be pre-shared or exchanged via a secure key establishment protocol.
+Most encryption today relies on **math problems that are hard to solve** (like factoring large primes). Quantum computers threaten to break those problems.
+
+This project takes a fundamentally different approach — it uses **physics instead of math** to secure IoT sensor data:
+
+1. The ESP32 microcontroller generates **true random numbers** from physical noise (thermal + RF jitter).
+2. Those random numbers are used as a **One-Time Pad (OTP)** to mask sensor readings.
+3. Claude Shannon proved in 1949 that this method is **mathematically unbreakable** — even by quantum computers — as long as the pad is truly random and never reused.
+
+The result is a full end-to-end pipeline: sensors → encryption → transmission → decryption → integrity verification, with a real-time dashboard to visualize every step.
+
+> [!NOTE]
+> **Educational Demonstration** — This project transmits the pad alongside the ciphertext for demonstration purposes. In a production deployment, pad material would be pre-shared or exchanged via a secure key establishment protocol.
 
 ---
 
-## Architecture
+## How It Works
 
 ```
-┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐
-│  Sensor  │───▶│ Quantize │───▶│ HMAC Tag │───▶│ OTP Mask │───▶│ Transmit │───▶│OTP Unmask│───▶│  Verify  │
-│  (ESP32) │    │ (float→Z)│    │ SHA-256  │    │ (x+K)%257│    │ (serial) │    │(C-K+257) │    │ HMAC cmp │
-└──────────┘    └──────────┘    └──────────┘    └──────────┘    └──────────┘    └──────────┘    └──────────┘
+  Sensor (ESP32)          Backend Server            Dashboard
+  ──────────────          ──────────────            ─────────
+       │                        │                       │
+  Read analog data              │                       │
+       │                        │                       │
+  Generate random pad           │                       │
+  (hardware TRNG)               │                       │
+       │                        │                       │
+  Send via USB Serial ─────►  Receive                   │
+                               │                        │
+                          Quantize floats               │
+                          to discrete states            │
+                               │                        │
+                          Compute HMAC-SHA256            │
+                          (integrity tag)               │
+                               │                        │
+                          OTP Encrypt:                   │
+                          C = (data + pad) mod 257       │
+                               │                        │
+                          OTP Decrypt:                   │
+                          data = (C - pad + 257) mod 257 │
+                               │                        │
+                          Verify HMAC ──────────────► Display live
+                               │                    telemetry, charts,
+                               │                    entropy metrics
 ```
 
-### Core Principles
+### Why mod 257?
 
-1. **Information-Theoretic Security**: When the pad is truly random and used once, ciphertext yields zero statistical mutual information: `I(X; C) = 0`. Quantum algorithms (Shor's, Grover's) cannot break this.
+257 is a **prime number** just above 256 (the byte range). Using a prime modulus ensures the OTP arithmetic wraps uniformly across all possible values with no bias, which is essential for Shannon's perfect secrecy guarantee.
 
-2. **Deterministic Threshold Quantization**: Continuous float sensor values → discrete integer states (`x ∈ [0, M-1]`) via configurable threshold bins.
+---
 
-3. **Physical Entropy Keystream**: Fresh entropy bytes from ESP32 `esp_random()` (thermal noise + RF jitter), or `os.urandom()` CSPRNG fallback.
+## Key Concepts
 
-4. **Modular OTP Arithmetic** (N = 257, prime):
-   - Encrypt: `C_i = (x_i + K_i) mod 257`
-   - Decrypt: `x_i = (C_i - K_i + 257) mod 257`
-
-5. **HMAC-SHA256 Integrity**: Computed over quantized plaintext before masking. Verified after unmasking.
+| Concept | What it Means | Where in the Code |
+|---------|--------------|-------------------|
+| **One-Time Pad (OTP)** | Each sensor reading is masked with a fresh random key, making ciphertext statistically independent of plaintext | `crypto_core.py` — `otp_encrypt()`, `otp_decrypt()` |
+| **Shannon Entropy** | Measures how "random" the pad actually is. Max ≈ 8.006 bits means perfectly uniform | `crypto_core.py` — `EntropyAnalyzer.shannon_entropy()` |
+| **HMAC-SHA256** | A keyed hash that detects any tampering with the data after encryption | `crypto_core.py` — `compute_hmac()`, `verify_hmac()` |
+| **Threshold Quantization** | Converts continuous sensor floats (e.g., 25.3°C) into discrete integer states (e.g., state 2) for encryption | `crypto_core.py` — `quantize_value()` |
+| **Hardware TRNG** | True Random Number Generator on the ESP32 chip — randomness from physical noise, not a software algorithm | `firmware/esp32_otp_sensor.ino` — `esp_random()` |
 
 ---
 
@@ -41,18 +87,23 @@ This project is an **information-theoretic OTP demonstration** using physical en
 
 ```
 ├── firmware/
-│   └── esp32_otp_sensor.ino       # Arduino: TRNG entropy + sensor + JSON serial
+│   └── esp32_otp_sensor.ino       # Arduino firmware: TRNG + sensor reading + JSON serial output
+│
 ├── backend/
-│   ├── main.py                    # FastAPI app: REST + WebSocket + static serving
-│   ├── crypto_core.py             # Quantization, OTP mask/unmask, HMAC, entropy analysis
-│   ├── simulator.py               # Virtual sensor + CSPRNG entropy fallback
-│   ├── serial_bridge.py           # pyserial ESP32 auto-detect + fallback
-│   ├── config.py                  # All tunable parameters
+│   ├── main.py                    # FastAPI server: REST API + WebSocket + static file serving
+│   ├── crypto_core.py             # Core cryptography: OTP, HMAC, quantization, entropy analysis
+│   ├── simulator.py               # Virtual sensor + CSPRNG fallback (when no ESP32 is connected)
+│   ├── serial_bridge.py           # Auto-detect ESP32 via USB serial + graceful fallback
+│   ├── config.py                  # All tunable parameters (thresholds, channels, network)
 │   └── requirements.txt           # Python dependencies
+│
 ├── dashboard/
 │   ├── index.html                 # Single-page real-time dashboard
-│   ├── style.css                  # Dark glassmorphism premium styling
-│   └── app.js                     # WebSocket client, canvas charts, live rendering
+│   ├── style.css                  # Dark glassmorphism UI styling
+│   ├── app.js                     # WebSocket client, canvas charts, live rendering
+│   ├── favicon.svg                # Custom SVG favicon (shield + entropy waveform + lock)
+│   └── favicon.png                # PNG fallback favicon for older browsers
+│
 └── README.md
 ```
 
@@ -61,37 +112,54 @@ This project is an **information-theoretic OTP demonstration** using physical en
 ## Quick Start
 
 ### Prerequisites
-- Python 3.10+
-- pip
 
-### 1. Install Dependencies
+- **Python 3.10+** with pip
+- *(Optional)* ESP32 dev board connected via USB for hardware entropy
+
+### 1. Install dependencies
 
 ```bash
 cd backend
 pip install -r requirements.txt
 ```
 
-### 2. Run Self-Tests
+### 2. Verify the crypto module
 
 ```bash
 cd backend
 python crypto_core.py
 ```
 
-Expected output: `ALL SELF-TESTS PASSED ✓`
+You should see: `ALL SELF-TESTS PASSED ✓`
 
-### 3. Start the Server
+### 3. Start the server
 
 ```bash
 cd backend
 python main.py
 ```
 
-The server auto-detects ESP32 on USB. If none found, it falls back to the simulator.
+> The server auto-detects an ESP32 on USB. If none is found, it automatically falls back to a software simulator with `os.urandom()` as the entropy source.
 
-### 4. Open the Dashboard
+### 4. Open the dashboard
 
 Navigate to **http://localhost:8000** in your browser.
+
+---
+
+## Dashboard
+
+The real-time dashboard visualizes the entire encryption pipeline as it runs:
+
+- **Live Pipeline Animation** — Watch data flow through each stage: Sensor → Quantize → HMAC → OTP Mask → Transmit → Unmask → Verify
+- **8-Channel Sensor Grid** — Raw values, quantized states, pad bytes, ciphertext, and decrypted values side by side
+- **Canvas Sparkline Charts** — Per-channel history rendered with zero external dependencies
+- **HMAC Integrity Panel** — Side-by-side hash comparison with tamper detection
+- **Tamper Test** — One-click button to deliberately corrupt a frame and watch HMAC catch it
+- **Entropy Quality Metrics** — Live Shannon entropy, χ² uniformity score, and min-entropy
+- **Entropy Histogram** — Visual distribution of pad bytes (should be near-uniform)
+- **Live Math Showcase** — Real-time formula substitution with actual values
+- **Packet Log** — Scrolling log of the last 50 telemetry frames
 
 ---
 
@@ -99,48 +167,20 @@ Navigate to **http://localhost:8000** in your browser.
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/api/status` | System status, source mode, uptime, packet count |
-| `GET` | `/api/config` | Public crypto parameters (N, thresholds, labels) |
+| `GET` | `/api/status` | System status, entropy source, uptime, packet count |
+| `GET` | `/api/config` | Public crypto parameters (modulus, thresholds, labels) |
 | `GET` | `/api/latest` | Latest full pipeline snapshot |
-| `GET` | `/api/entropy` | Entropy quality metrics + byte distribution |
+| `GET` | `/api/entropy` | Entropy quality metrics + byte distribution histogram |
 | `GET` | `/api/log` | Last 50 telemetry frames |
-| `POST` | `/api/tamper` | Arm deliberate ciphertext corruption for next frame |
-| `WS` | `/ws/telemetry` | Real-time streaming of full pipeline frames |
-
----
-
-## ESP32 Firmware
-
-Flash `firmware/esp32_otp_sensor.ino` using Arduino IDE or PlatformIO:
-
-1. Select board: **ESP32 Dev Module**
-2. Set baud rate: **115200**
-3. Upload and open Serial Monitor to verify JSON output
-
-The firmware auto-detects whether real analog sensors are wired. If not, it generates synthetic data using `esp_random()` for entropy and sinusoidal drift for sensor values.
-
----
-
-## Dashboard Features
-
-- **Dark glassmorphism** design with cyan/teal accent gradients
-- **Animated pipeline visualization** showing data flow through all stages
-- **8-channel live grid** with raw values, quantized states, pad bytes, ciphertext, and decrypted values
-- **Canvas sparkline charts** per channel (no external libraries)
-- **HMAC integrity panel** with side-by-side hash comparison
-- **Tamper test button** for live HMAC failure demonstration
-- **Entropy quality metrics**: Shannon entropy, χ² uniformity, min-entropy
-- **Entropy histogram** showing pad byte distribution
-- **Live math showcase** with real-time formula substitution
-- **Scrolling packet log** of last 50 frames
-- **WebSocket auto-reconnect** with exponential backoff
+| `POST` | `/api/tamper` | Arm deliberate ciphertext corruption for the next frame |
+| `WS` | `/ws/telemetry` | Real-time WebSocket stream of full pipeline frames |
 
 ---
 
 ## Sensor Channels
 
-| Channel | Label | Unit | Threshold Bins |
-|---------|-------|------|----------------|
+| # | Sensor | Unit | Threshold Bins |
+|---|--------|------|----------------|
 | 0 | Temperature | °C | 0, 15, 25, 35, 50, 70, 100 |
 | 1 | Humidity | %RH | 0, 20, 40, 60, 80, 100 |
 | 2 | Pressure | hPa | 950, 980, 1000, 1013, 1030, 1050 |
@@ -152,6 +192,19 @@ The firmware auto-detects whether real analog sensors are wired. If not, it gene
 
 ---
 
+## ESP32 Firmware
+
+To use real hardware entropy instead of the software fallback:
+
+1. Open `firmware/esp32_otp_sensor.ino` in **Arduino IDE** or **PlatformIO**
+2. Select board: **ESP32 Dev Module**
+3. Set baud rate: **115200**
+4. Upload and verify JSON output in the Serial Monitor
+
+The firmware auto-detects whether real analog sensors are wired. If not, it generates synthetic data with `esp_random()` for entropy and sinusoidal drift for sensor values.
+
+---
+
 ## License
 
-MIT License — Educational and demonstration use.
+MIT License — See [LICENSE](LICENSE) for details.
