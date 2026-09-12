@@ -21,14 +21,29 @@ NUM_CHANNELS: int = 8
 
 SENSOR_LABELS: list[str] = [
     "Temperature",   # °C
-    "Humidity",       # %RH
-    "Pressure",       # hPa
-    "Light",          # lux
-    "CO₂",            # ppm
-    "Vibration",      # g
-    "Voltage",        # V
-    "Current",        # A
+    "Humidity",      # %RH
+    "Pressure",      # hPa
+    "Light",         # lux
+    "CO2",           # ppm
+    "Vibration",     # g
+    "Voltage",       # V
+    "Current",       # A
 ]
+
+SIMULATOR_UNITS: list[str] = ["°C", "%RH", "hPa", "lux", "ppm", "g", "V", "A"]
+
+HARDWARE_LABELS: list[str] = [
+    "Temperature",    # °C (DHT22)
+    "Humidity",       # %RH (DHT22)
+    "Distance",       # cm (HC-SR04)
+    "MQ3 Alcohol",    # ADC raw (0-4095)
+    "MQ135 Air Qlt",  # ADC raw (0-4095)
+    "MQ9 CO/Gas",     # ADC raw (0-4095)
+    "MQ5 LPG Gas",    # ADC raw (0-4095)
+    "ESP32 Bus",      # 3.3V System
+]
+
+HARDWARE_UNITS: list[str] = ["°C", "%RH", "cm", "ADC", "ADC", "ADC", "ADC", "V"]
 
 # Quantization threshold arrays — bin edges per channel.
 # A reading in [thresholds[i], thresholds[i+1]) maps to state i.
@@ -52,6 +67,25 @@ THRESHOLDS: list[list[float]] = [
     [0.0, 0.5, 1.0, 2.0, 5.0],
 ]
 
+HARDWARE_THRESHOLDS: list[list[float]] = [
+    # Temperature (°C)
+    [0.0, 15.0, 25.0, 35.0, 50.0, 70.0, 100.0],
+    # Humidity (%RH)
+    [0.0, 20.0, 40.0, 60.0, 80.0, 100.0],
+    # Distance (cm)
+    [0.0, 10.0, 30.0, 60.0, 100.0, 200.0, 400.0],
+    # MQ3 Alcohol (ADC)
+    [0.0, 300.0, 600.0, 1000.0, 1800.0, 2800.0, 4095.0],
+    # MQ135 Air Quality (ADC)
+    [0.0, 300.0, 600.0, 1000.0, 1800.0, 2800.0, 4095.0],
+    # MQ9 CO/Gas (ADC)
+    [0.0, 300.0, 600.0, 1000.0, 1800.0, 2800.0, 4095.0],
+    # MQ5 LPG (ADC)
+    [0.0, 300.0, 600.0, 1000.0, 1800.0, 2800.0, 4095.0],
+    # ESP32 Bus (V)
+    [0.0, 1.0, 2.5, 3.2, 3.6, 5.0],
+]
+
 # ---------------------------------------------------------------------------
 # HMAC Integrity Key (pre-shared, 32 bytes)
 # ---------------------------------------------------------------------------
@@ -71,7 +105,7 @@ SERIAL_TIMEOUT: float = 1.0
 # Entropy & Telemetry
 # ---------------------------------------------------------------------------
 PAD_HISTORY_SIZE: int = 100       # Sliding window for entropy quality metrics
-FRAME_INTERVAL_MS: int = 1000     # Telemetry frame period (milliseconds)
+FRAME_INTERVAL_MS: int = 250       # Telemetry frame period (milliseconds) — 4 Hz real-time
 MAX_LOG_FRAMES: int = 50          # Dashboard log depth
 
 # ---------------------------------------------------------------------------

@@ -1,12 +1,15 @@
 """
-serial_bridge.py — ESP32 auto-detection and unified sensor stream provider.
+serial_bridge.py — ESP32 auto-detection, robust dual-mode parser, and unified sensor stream.
 
-Scans all available serial ports for an ESP32 device. If found, reads
-JSON telemetry frames from the hardware over USB Serial. If no ESP32 is
-detected, seamlessly falls back to the internal VirtualSensorGenerator.
-
-Provides a unified async generator `sensor_stream()` consumed by the
-FastAPI WebSocket and REST endpoints.
+Supports:
+1. Physical ESP32 hardware streaming human-readable sensor lines from `firmware/esp32_otp_sensor.ino`:
+   - MQ3 (Alcohol), MQ135 (Air Quality), MQ9 (CO/Gas), MQ5 (LPG)
+   - HC-SR04 Ultrasonic Distance
+   - DHT22 Humidity & Temperature
+2. Physical ESP32 hardware streaming JSON telemetry frames:
+   {"v": [v0..v7], "pad": [k0..k7], "pid": N}
+3. Seamless fallback to VirtualSensorGenerator when no hardware is connected.
+4. Dynamic port scanning, connect/disconnect controls via REST API and dashboard UI.
 """
 
 from __future__ import annotations
@@ -14,223 +17,440 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
+import re
+import sys
+import time
 from typing import AsyncGenerator, Optional
 
-from config import SERIAL_BAUD, SERIAL_TIMEOUT, N, NUM_CHANNELS
+from config import (
+    SERIAL_BAUD,
+    SERIAL_TIMEOUT,
+    N,
+    NUM_CHANNELS,
+    HARDWARE_LABELS,
+    HARDWARE_UNITS,
+    SENSOR_LABELS,
+    SIMULATOR_UNITS,
+)
 from simulator import VirtualSensorGenerator
 
 logger = logging.getLogger("serial_bridge")
 logger.setLevel(logging.INFO)
 
 # ═══════════════════════════════════════════════════════════════════════════
-# ESP32 HARDWARE DETECTION
+# ESP32 HARDWARE DETECTION & PORT SCANNING
 # ═══════════════════════════════════════════════════════════════════════════
 
-def detect_esp32() -> Optional[str]:
-    """
-    Scan all available serial ports and attempt to identify an ESP32 device.
+ESP32_IDENTIFIERS = [
+    "CP210",        # Silicon Labs CP2102/CP2104
+    "CH340",        # WCH CH340
+    "CH910",        # WCH CH9102
+    "FTDI",         # FTDI USB-UART
+    "USB SERIAL",
+    "USB-SERIAL",
+    "ESP32",
+    "SLAB_USBTOUART",
+    "UART",
+]
 
-    Looks for common ESP32 USB-to-Serial chip identifiers in the port
-    description or hardware ID (CP210x, CH340, FTDI, etc.).
+
+def list_available_ports() -> list[dict]:
+    """
+    Scan all available serial ports on the host system.
 
     Returns
     -------
-    str or None
-        The serial port name (e.g., 'COM3', '/dev/ttyUSB0') if an ESP32
-        is detected, or None if no compatible device is found.
+    list[dict]
+        List of dicts with keys: device, description, hwid, is_esp
     """
     try:
         import serial.tools.list_ports
+        ports = serial.tools.list_ports.comports()
+        result = []
+        for port in ports:
+            info_str = f"{port.description} {port.hwid}".upper()
+            is_esp = any(ident in info_str for ident in ESP32_IDENTIFIERS)
+            result.append({
+                "device": port.device,
+                "description": port.description or "Serial Device",
+                "hwid": port.hwid or "",
+                "is_esp": is_esp,
+            })
+        return result
     except ImportError:
-        logger.warning("pyserial not installed — cannot scan for ESP32 hardware")
-        return None
+        logger.warning("pyserial not installed — cannot scan serial ports")
+        return []
+    except Exception as exc:
+        logger.error(f"Error scanning serial ports: {exc}")
+        return []
 
-    esp32_identifiers = [
-        "CP210",     # Silicon Labs CP2102/CP2104
-        "CH340",     # WCH CH340
-        "CH910",     # WCH CH9102
-        "FTDI",      # FTDI chips
-        "USB Serial",
-        "USB-SERIAL",
-        "ESP32",
-        "SLAB_USBtoUART",
-    ]
 
-    ports = serial.tools.list_ports.comports()
-    for port in ports:
-        port_info = f"{port.description} {port.hwid}".upper()
-        for ident in esp32_identifiers:
-            if ident.upper() in port_info:
-                logger.info(
-                    f"ESP32 detected on {port.device} "
-                    f"({port.description}, HWID: {port.hwid})"
-                )
-                return port.device
-
-    logger.info(
-        f"No ESP32 detected among {len(ports)} port(s): "
-        f"{[p.device for p in ports]}"
-    )
+def detect_esp32() -> Optional[str]:
+    """
+    Scan available ports and return the first device flagged as an ESP32.
+    """
+    ports = list_available_ports()
+    for p in ports:
+        if p["is_esp"]:
+            logger.info(f"ESP32 candidate identified: {p['device']} ({p['description']})")
+            return p["device"]
+    if ports:
+        logger.info(f"No explicitly branded ESP32 found; defaulting to first available port {ports[0]['device']}")
+        return ports[0]["device"]
     return None
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# HARDWARE SERIAL READER
+# ROBUST HARDWARE SERIAL READER
 # ═══════════════════════════════════════════════════════════════════════════
 
 class HardwareSerialReader:
     """
-    Reads JSON telemetry frames from an ESP32 over USB Serial.
+    Reads and parses telemetry frames from ESP32 over USB Serial.
 
-    Expected JSON format per line:
-        {"v":[f0,...,f7], "pad":[k0,...,k7], "pid": N}
+    Handles:
+    - Text bursts from esp32_otp_sensor.ino
+    - JSON frames {"v":[...], "pad":[...], "pid": N}
+    - Noise, unprintable characters, and baud sync anomalies
     """
 
     def __init__(self, port: str, baud: int = SERIAL_BAUD):
-        self._port = port
-        self._baud = baud
+        self.port = port
+        self.baud = baud
         self._serial = None
+        self.packets_read = 0
+        self.last_seen = 0.0
+
+        # Accumulated sensor state from esp32_otp_sensor.ino
+        self._accumulated = {
+            "temp": 25.0,
+            "hum": 50.0,
+            "dist": 30.0,
+            "mq3": 400.0,
+            "mq135": 300.0,
+            "mq9": 200.0,
+            "mq5": 250.0,
+            "bus": 3.30,
+        }
+        self._last_valid_frame: Optional[dict] = None
+        self._packet_id = 0
+        self._items_in_current_burst = 0
+
+    @property
+    def is_open(self) -> bool:
+        return self._serial is not None and self._serial.is_open
 
     def connect(self) -> bool:
         """Open the serial port. Returns True on success."""
         try:
             import serial as pyserial
             self._serial = pyserial.Serial(
-                self._port,
-                self._baud,
+                self.port,
+                self.baud,
                 timeout=SERIAL_TIMEOUT,
             )
-            # Flush any startup junk
+            # Flush startup garbage
             self._serial.reset_input_buffer()
-            logger.info(f"Serial port {self._port} opened at {self._baud} baud")
+            self.last_seen = time.time()
+            logger.info(f"✓ HardwareSerialReader connected to {self.port} at {self.baud} baud")
             return True
         except Exception as exc:
-            logger.error(f"Failed to open serial port {self._port}: {exc}")
+            logger.error(f"Failed to open {self.port}: {exc}")
             self._serial = None
             return False
 
     def read_frame(self) -> Optional[dict]:
         """
-        Read one JSON frame from the serial port.
-
-        Skips comment lines (starting with '#') and blank lines.
-        Returns None if no valid frame is available.
+        Read from serial port, parse lines, and assemble complete frames.
+        Returns None if no full frame has formed yet or read timed out.
         """
-        if self._serial is None:
+        if not self.is_open:
             return None
 
         try:
-            line = self._serial.readline().decode("utf-8", errors="replace").strip()
-            if not line or line.startswith("#"):
-                return None
-            frame = json.loads(line)
-            # Validate structure
-            if "v" in frame and "pad" in frame and "pid" in frame:
-                if (
-                    len(frame["v"]) == NUM_CHANNELS
-                    and len(frame["pad"]) == NUM_CHANNELS
-                ):
-                    return frame
-            logger.warning(f"Malformed frame: {line[:80]}")
+            for _ in range(12):
+                if not self.is_open or self._serial.in_waiting == 0:
+                    break
+
+                raw_bytes = self._serial.readline()
+                if not raw_bytes:
+                    break
+
+                line = raw_bytes.decode("utf-8", errors="ignore").strip()
+                if not line:
+                    continue
+
+                self.last_seen = time.time()
+
+                # Case 1: JSON frame
+                if line.startswith("{") and line.endswith("}"):
+                    try:
+                        data = json.loads(line)
+                        if "v" in data and isinstance(data["v"], list) and len(data["v"]) >= NUM_CHANNELS:
+                            raw_vals = [float(x) for x in data["v"][:NUM_CHANNELS]]
+                            pad = data.get("pad")
+                            if not pad or len(pad) < NUM_CHANNELS:
+                                pad = [b % N for b in os.urandom(NUM_CHANNELS)]
+                            else:
+                                pad = [int(p) % N for p in pad[:NUM_CHANNELS]]
+
+                            self._packet_id += 1
+                            self.packets_read += 1
+                            frame = {
+                                "v": raw_vals,
+                                "pad": pad,
+                                "pid": data.get("pid", self._packet_id),
+                                "scenario": "ESP32_JSON",
+                            }
+                            self._last_valid_frame = frame
+                            return frame
+                    except Exception as e:
+                        logger.debug(f"JSON parse error on line: {line[:50]} ({e})")
+
+                # Case 2: Human-readable text format from esp32_otp_sensor.ino
+                matched = self._parse_text_line(line)
+                if matched:
+                    self._items_in_current_burst += 1
+
+                # Delimiter line
+                if "=========" in line or self._items_in_current_burst >= 6:
+                    self._items_in_current_burst = 0
+                    frame = self._build_hardware_frame()
+                    if frame:
+                        return frame
+
             return None
-        except json.JSONDecodeError:
-            return None
+
         except Exception as exc:
-            logger.error(f"Serial read error: {exc}")
+            logger.error(f"Serial port read exception on {self.port}: {exc}")
+            self.close()
             return None
+
+    def _parse_text_line(self, line: str) -> bool:
+        """Parse individual sensor key-value line from esp32_otp_sensor.ino."""
+        line_clean = line.replace("\t", " ").strip()
+
+        # MQ3 (Alcohol): <val>
+        m = re.search(r"MQ3\s*\(Alcohol\)\s*:\s*([\d\.]+)", line_clean, re.IGNORECASE)
+        if m:
+            val = float(m.group(1))
+            if 0 <= val <= 4095:
+                self._accumulated["mq3"] = val
+            return True
+
+        # MQ135 (Air Qlt): <val>
+        m = re.search(r"MQ135\s*\(Air\s*Qlt\)\s*:\s*([\d\.]+)", line_clean, re.IGNORECASE)
+        if m:
+            val = float(m.group(1))
+            if 0 <= val <= 4095:
+                self._accumulated["mq135"] = val
+            return True
+
+        # MQ9 (CO/Gas): <val>
+        m = re.search(r"MQ9\s*\(CO/Gas\)\s*:\s*([\d\.]+)", line_clean, re.IGNORECASE)
+        if m:
+            val = float(m.group(1))
+            if 0 <= val <= 4095:
+                self._accumulated["mq9"] = val
+            return True
+
+        # MQ5 (LPG): <val>
+        m = re.search(r"MQ5\s*\(LPG\)\s*:\s*([\d\.]+)", line_clean, re.IGNORECASE)
+        if m:
+            val = float(m.group(1))
+            if 0 <= val <= 4095:
+                self._accumulated["mq5"] = val
+            return True
+
+        # Distance: <val> cm
+        m = re.search(r"Distance\s*:\s*([\d\.]+)", line_clean, re.IGNORECASE)
+        if m:
+            val = float(m.group(1))
+            if 1.0 <= val <= 500.0:
+                self._accumulated["dist"] = val
+            return True
+
+        # Humidity: <val>%  |  Temp: <val> °C
+        m = re.search(r"Humidity\s*:\s*([\d\.]+).*?Temp\s*:\s*([\d\.]+)", line_clean, re.IGNORECASE)
+        if m:
+            hum = float(m.group(1))
+            temp = float(m.group(2))
+            if 0.0 <= hum <= 100.0:
+                self._accumulated["hum"] = hum
+            if -40.0 <= temp <= 125.0:
+                self._accumulated["temp"] = temp
+            return True
+
+        # Single Temp line
+        m = re.search(r"Temp(?:erature)?\s*:\s*([\d\.]+)", line_clean, re.IGNORECASE)
+        if m:
+            temp = float(m.group(1))
+            if -40.0 <= temp <= 125.0:
+                self._accumulated["temp"] = temp
+            return True
+
+        # Single Humidity line
+        m = re.search(r"Humidity\s*:\s*([\d\.]+)", line_clean, re.IGNORECASE)
+        if m:
+            hum = float(m.group(1))
+            if 0.0 <= hum <= 100.0:
+                self._accumulated["hum"] = hum
+            return True
+
+        return False
+
+    def _build_hardware_frame(self) -> dict:
+        """Assemble current accumulated sensor values into an 8-channel frame."""
+        self._packet_id += 1
+        self.packets_read += 1
+
+        values = [
+            round(self._accumulated["temp"], 2),
+            round(self._accumulated["hum"], 2),
+            round(self._accumulated["dist"], 2),
+            round(self._accumulated["mq3"], 1),
+            round(self._accumulated["mq135"], 1),
+            round(self._accumulated["mq9"], 1),
+            round(self._accumulated["mq5"], 1),
+            round(self._accumulated["bus"], 2),
+        ]
+
+        pad = [b % N for b in os.urandom(NUM_CHANNELS)]
+
+        frame = {
+            "v": values,
+            "pad": pad,
+            "pid": self._packet_id,
+            "scenario": "ESP32_PHYSICAL",
+        }
+        self._last_valid_frame = frame
+        return frame
 
     def close(self) -> None:
         """Close the serial port."""
-        if self._serial and self._serial.is_open:
-            self._serial.close()
-            logger.info(f"Serial port {self._port} closed")
+        if self._serial:
+            try:
+                self._serial.close()
+            except Exception:
+                pass
+            self._serial = None
+            logger.info(f"Serial port {self.port} closed")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# UNIFIED SENSOR STREAM
+# UNIFIED SENSOR BRIDGE
 # ═══════════════════════════════════════════════════════════════════════════
 
 class SensorBridge:
     """
-    Unified sensor data provider that auto-detects ESP32 hardware and
-    falls back to the virtual sensor simulator.
-
-    Attributes
-    ----------
-    source : str
-        "HARDWARE/TRNG" if reading from ESP32, "SIMULATOR/CSPRNG" otherwise.
+    Unified sensor data provider that connects to physical ESP32 hardware
+    or smoothly falls back to the virtual sensor simulator.
     """
 
     def __init__(self):
         self.source: str = "SIMULATOR/CSPRNG"
         self._hardware: Optional[HardwareSerialReader] = None
-        self._simulator: Optional[VirtualSensorGenerator] = None
-        self._detect_and_connect()
+        self._simulator: VirtualSensorGenerator = VirtualSensorGenerator()
+        self.active_port: Optional[str] = None
+        self.active_baud: int = SERIAL_BAUD
+        self.last_status_msg: str = "Simulator active (CSPRNG entropy)"
 
-    def _detect_and_connect(self) -> None:
-        """Try to detect and connect to ESP32 hardware."""
+        # Try to detect ESP32 on startup
+        self.auto_connect()
+
+    @property
+    def is_hardware(self) -> bool:
+        return self._hardware is not None and self._hardware.is_open
+
+    def get_channel_labels(self) -> list[str]:
+        return HARDWARE_LABELS if self.is_hardware else SENSOR_LABELS
+
+    def get_channel_units(self) -> list[str]:
+        return HARDWARE_UNITS if self.is_hardware else SIMULATOR_UNITS
+
+    def auto_connect(self) -> tuple[bool, str]:
+        """Attempt to find and connect to an ESP32 port automatically."""
         port = detect_esp32()
         if port:
-            reader = HardwareSerialReader(port)
-            if reader.connect():
-                self._hardware = reader
-                self.source = "HARDWARE/TRNG"
-                logger.info("✓ Using HARDWARE source (ESP32 TRNG)")
-                return
-            else:
-                logger.warning("ESP32 detected but connection failed — falling back to simulator")
-
-        self._simulator = VirtualSensorGenerator()
+            return self.connect_port(port, self.active_baud)
         self.source = "SIMULATOR/CSPRNG"
-        logger.info("✓ Using SIMULATOR source (CSPRNG entropy)")
+        self.last_status_msg = "No ESP32 detected - using Simulator"
+        return False, self.last_status_msg
+
+    def connect_port(self, port: str, baud: int = SERIAL_BAUD) -> tuple[bool, str]:
+        """Connect to a specific serial COM port."""
+        self.disconnect()
+
+        reader = HardwareSerialReader(port, baud)
+        if reader.connect():
+            self._hardware = reader
+            self.active_port = port
+            self.active_baud = baud
+            self.source = f"HARDWARE ({port})"
+            self.last_status_msg = f"Connected to ESP32 on {port} @ {baud} baud"
+            logger.info(f"✓ {self.last_status_msg}")
+            return True, self.last_status_msg
+        else:
+            self.source = "SIMULATOR/CSPRNG"
+            self.last_status_msg = f"Failed to connect to {port}"
+            return False, self.last_status_msg
+
+    def disconnect(self) -> tuple[bool, str]:
+        """Disconnect physical hardware and revert to simulator."""
+        if self._hardware:
+            self._hardware.close()
+            self._hardware = None
+        self.active_port = None
+        self.source = "SIMULATOR/CSPRNG"
+        self.last_status_msg = "Disconnected from hardware - Simulator active"
+        logger.info("Switched to Simulator source")
+        return True, self.last_status_msg
+
+    def get_hardware_info(self) -> dict:
+        """Return diagnostic status of the hardware connection."""
+        available = list_available_ports()
+        hw_connected = self.is_hardware
+        return {
+            "connected": hw_connected,
+            "port": self.active_port,
+            "baud": self.active_baud,
+            "source": self.source,
+            "status_message": self.last_status_msg,
+            "packets_read": self._hardware.packets_read if hw_connected else 0,
+            "last_seen": round(self._hardware.last_seen, 2) if hw_connected else 0,
+            "available_ports": available,
+        }
 
     def read_frame(self) -> Optional[dict]:
         """
         Read one sensor frame from the active source (hardware or simulator).
-
-        Returns
-        -------
-        dict or None
-            Sensor frame: {"v": [...], "pad": [...], "pid": int}
         """
-        if self._hardware:
+        if self.is_hardware:
             frame = self._hardware.read_frame()
             if frame:
                 return frame
-            # Hardware read failed — check if port is still alive
-            logger.warning("Hardware read returned None — may be disconnected")
-            return None
+            # If hardware was disconnected or timed out for > 8 seconds
+            if time.time() - self._hardware.last_seen > 8.0:
+                logger.warning(f"No data received from {self.active_port} for 8s — falling back to simulator")
+                self.disconnect()
+                return self._simulator.generate_reading()
 
-        if self._simulator:
-            return self._simulator.generate_reading()
+            if self._hardware._last_valid_frame:
+                return self._hardware._last_valid_frame
 
-        return None
+        return self._simulator.generate_reading()
 
     def close(self) -> None:
-        """Clean up resources."""
-        if self._hardware:
-            self._hardware.close()
+        """Clean up hardware connection."""
+        self.disconnect()
 
 
 async def sensor_stream(bridge: SensorBridge) -> AsyncGenerator[dict, None]:
     """
-    Async generator that yields sensor frames at the configured interval.
-
-    This is the primary data source consumed by the FastAPI WebSocket
-    endpoint and the background telemetry loop.
-
-    Parameters
-    ----------
-    bridge : SensorBridge
-        The initialized sensor bridge (hardware or simulator).
-
-    Yields
-    ------
-    dict
-        Sensor frame with keys: v, pad, pid
+    Async generator yielding sensor frames at the configured interval.
     """
     from config import FRAME_INTERVAL_MS
-
     interval = FRAME_INTERVAL_MS / 1000.0
 
     while True:
@@ -240,39 +460,3 @@ async def sensor_stream(bridge: SensorBridge) -> AsyncGenerator[dict, None]:
         if frame:
             yield frame
         await asyncio.sleep(interval)
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# STANDALONE TEST
-# ═══════════════════════════════════════════════════════════════════════════
-
-if __name__ == "__main__":
-    import time
-    from config import SENSOR_LABELS
-
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
-    )
-
-    print("=" * 60)
-    print("  SERIAL BRIDGE — STANDALONE TEST")
-    print("=" * 60)
-
-    bridge = SensorBridge()
-    print(f"\nSource: {bridge.source}\n")
-
-    for i in range(5):
-        frame = bridge.read_frame()
-        if frame:
-            print(f"Frame #{frame['pid']}:")
-            for ch in range(NUM_CHANNELS):
-                print(
-                    f"  {SENSOR_LABELS[ch]:>12s}: "
-                    f"val={frame['v'][ch]:>10.2f}  "
-                    f"pad={frame['pad'][ch]:>3d}"
-                )
-        time.sleep(1)
-
-    bridge.close()
-    print("\n✓ Serial bridge test complete.")

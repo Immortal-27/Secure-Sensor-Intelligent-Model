@@ -43,7 +43,11 @@ from config import (
     N,
     NUM_CHANNELS,
     SENSOR_LABELS,
+    HARDWARE_LABELS,
+    HARDWARE_UNITS,
+    SIMULATOR_UNITS,
     THRESHOLDS,
+    HARDWARE_THRESHOLDS,
     HOST,
     PORT,
     FRAME_INTERVAL_MS,
@@ -55,7 +59,7 @@ from crypto_core import (
     EntropyAnalyzer,
     quantize_vector,
 )
-from serial_bridge import SensorBridge, sensor_stream
+from serial_bridge import SensorBridge, sensor_stream, list_available_ports
 
 # ═══════════════════════════════════════════════════════════════════════════
 # LOGGING
@@ -163,15 +167,20 @@ async def telemetry_loop():
             pid = raw_frame.get("pid", packet_count + 1)
             scenario = raw_frame.get("scenario", "UNKNOWN")
 
-            # Run crypto pipeline
+            # Run crypto pipeline with appropriate quantization thresholds
+            active_thresholds = HARDWARE_THRESHOLDS if bridge.is_hardware else THRESHOLDS
             if tamper_next:
-                result = process_frame_tampered(raw_values, pad)
+                result = process_frame_tampered(raw_values, pad, thresholds=active_thresholds)
                 tamper_next = False
             else:
-                result = process_frame(raw_values, pad)
+                result = process_frame(raw_values, pad, thresholds=active_thresholds)
 
             # Record entropy
             entropy_analyzer.record(pad)
+
+            # Dynamic sensor labels and units
+            channel_labels = bridge.get_channel_labels()
+            channel_units = bridge.get_channel_units()
 
             # Build full telemetry payload
             packet_count += 1
@@ -179,6 +188,7 @@ async def telemetry_loop():
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "packet_id": pid,
                 "source": bridge.source,
+                "is_hardware": bridge.is_hardware,
                 "scenario": scenario,
                 "raw_values": result["raw_values"],
                 "quantized": result["quantized"],
@@ -189,7 +199,10 @@ async def telemetry_loop():
                 "hmac_recomputed": result["hmac_recomputed"],
                 "integrity": result["integrity"],
                 "entropy_metrics": entropy_analyzer.get_metrics(),
-                "channel_labels": SENSOR_LABELS,
+                "channel_labels": channel_labels,
+                "channel_units": channel_units,
+                "hardware_status": bridge.get_hardware_info(),
+                "uptime_seconds": round(time.time() - start_time, 1),
                 "disclaimer": DISCLAIMER,
             }
 
@@ -287,11 +300,71 @@ async def trigger_tamper():
     """
     global tamper_next
     tamper_next = True
-    logger.warning("⚠ TAMPER TEST: next frame will have corrupted ciphertext")
+    logger.warning("[TAMPER TEST] Next frame will have corrupted ciphertext")
     return JSONResponse({
         "status": "tamper_armed",
         "message": "Next telemetry frame will have corrupted ciphertext to demonstrate HMAC integrity failure.",
     })
+
+
+@app.get("/api/ports")
+async def get_ports():
+    """Scan and return all available serial COM ports."""
+    ports = list_available_ports()
+    return JSONResponse({"ports": ports})
+
+
+@app.post("/api/connect_esp")
+async def connect_esp(request_data: Optional[dict] = None):
+    """
+    Connect to a specific serial port or auto-detect an ESP32.
+    Accepts JSON: {"port": "COM3", "baud": 115200}
+    """
+    global bridge
+    if bridge is None:
+        bridge = SensorBridge()
+
+    port = None
+    baud = 115200
+    if request_data:
+        port = request_data.get("port")
+        try:
+            baud = int(request_data.get("baud", 115200))
+        except (ValueError, TypeError):
+            baud = 115200
+
+    if port:
+        success, msg = bridge.connect_port(port, baud)
+    else:
+        success, msg = bridge.auto_connect()
+
+    return JSONResponse({
+        "success": success,
+        "message": msg,
+        "info": bridge.get_hardware_info(),
+    })
+
+
+@app.post("/api/disconnect_esp")
+async def disconnect_esp():
+    """Disconnect physical hardware and switch back to simulator."""
+    global bridge
+    if bridge:
+        success, msg = bridge.disconnect()
+        return JSONResponse({
+            "success": success,
+            "message": msg,
+            "info": bridge.get_hardware_info(),
+        })
+    return JSONResponse({"success": True, "message": "Simulator active", "info": {}})
+
+
+@app.get("/api/hardware_status")
+async def get_hardware_status():
+    """Return live ESP32 connection state and port details."""
+    if bridge:
+        return JSONResponse(bridge.get_hardware_info())
+    return JSONResponse({"connected": False, "source": "INITIALIZING"})
 
 
 # ═══════════════════════════════════════════════════════════════════════════

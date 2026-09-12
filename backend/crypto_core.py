@@ -58,7 +58,10 @@ def quantize_value(raw: float, thresholds: list[float]) -> int:
     return 0
 
 
-def quantize_vector(raw_values: list[float]) -> list[int]:
+def quantize_vector(
+    raw_values: list[float],
+    thresholds: Optional[list[list[float]]] = None,
+) -> list[int]:
     """
     Quantize an 8-channel sensor reading vector.
 
@@ -66,6 +69,8 @@ def quantize_vector(raw_values: list[float]) -> list[int]:
     ----------
     raw_values : list[float]
         Raw floating-point readings, one per channel (length NUM_CHANNELS).
+    thresholds : list[list[float]], optional
+        Bin edges per channel. Defaults to config.THRESHOLDS.
 
     Returns
     -------
@@ -76,8 +81,9 @@ def quantize_vector(raw_values: list[float]) -> list[int]:
         raise ValueError(
             f"Expected {NUM_CHANNELS} channels, got {len(raw_values)}"
         )
+    active_thresholds = thresholds if thresholds is not None else THRESHOLDS
     return [
-        quantize_value(raw_values[i], THRESHOLDS[i])
+        quantize_value(raw_values[i], active_thresholds[i])
         for i in range(NUM_CHANNELS)
     ]
 
@@ -197,6 +203,7 @@ def verify_integrity(
 def process_frame(
     raw_values: list[float],
     pad: list[int],
+    thresholds: Optional[list[list[float]]] = None,
 ) -> dict:
     """
     Execute the complete telemetry pipeline for one frame:
@@ -208,13 +215,15 @@ def process_frame(
         8-channel raw sensor readings.
     pad : list[int]
         8-element one-time pad (entropy bytes mod N).
+    thresholds : list[list[float]], optional
+        Per-channel bin edges. Defaults to config.THRESHOLDS.
 
     Returns
     -------
     dict
         Full pipeline state including all intermediate values.
     """
-    quantized = quantize_vector(raw_values)
+    quantized = quantize_vector(raw_values, thresholds)
     hmac_original = compute_hmac(quantized)
     ciphertext = otp_encrypt(quantized, pad)
     decrypted, hmac_recomputed, verified = verify_integrity(
@@ -237,6 +246,7 @@ def process_frame_tampered(
     pad: list[int],
     tamper_channel: int = 0,
     tamper_delta: int = 7,
+    thresholds: Optional[list[list[float]]] = None,
 ) -> dict:
     """
     Execute the pipeline but deliberately corrupt one ciphertext byte
@@ -252,13 +262,15 @@ def process_frame_tampered(
         Which channel index to corrupt (0-7).
     tamper_delta : int
         Amount to add to the ciphertext byte (mod N).
+    thresholds : list[list[float]], optional
+        Per-channel bin edges. Defaults to config.THRESHOLDS.
 
     Returns
     -------
     dict
         Full pipeline state showing the integrity failure.
     """
-    quantized = quantize_vector(raw_values)
+    quantized = quantize_vector(raw_values, thresholds)
     hmac_original = compute_hmac(quantized)
     ciphertext = otp_encrypt(quantized, pad)
 
