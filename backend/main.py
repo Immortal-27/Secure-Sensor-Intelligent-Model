@@ -27,12 +27,15 @@ import logging
 import os
 import sys
 import time
+import base64
+import io
+import hmac
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, UploadFile, File, Form, HTTPException
+from fastapi.responses import JSONResponse, FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -52,6 +55,7 @@ from config import (
     PORT,
     FRAME_INTERVAL_MS,
     MAX_LOG_FRAMES,
+    HMAC_KEY,
 )
 from crypto_core import (
     process_frame,
@@ -61,6 +65,7 @@ from crypto_core import (
 )
 from serial_bridge import SensorBridge, sensor_stream, list_available_ports
 from geo_weather import geo_weather_provider
+from entropy_engine import generate_file_pad, xor_bytes, compute_file_hmac, feed_hardware_entropy
 
 # ═══════════════════════════════════════════════════════════════════════════
 # LOGGING
@@ -202,6 +207,8 @@ async def telemetry_loop():
 
             # Record entropy
             entropy_analyzer.record(pad)
+            if pad:
+                feed_hardware_entropy(bytes(pad))
 
             # Dynamic sensor labels and units
             channel_labels = bridge.get_channel_labels()
@@ -372,6 +379,242 @@ async def get_entropy():
 async def get_log():
     """Return the last N telemetry frames."""
     return JSONResponse({"frames": frame_log})
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# ARBITRARY FILE ENTROPY VAULT (OTP & HMAC-SHA256)
+# ═══════════════════════════════════════════════════════════════════════════
+
+MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
+ALLOWED_FILE_EXTENSIONS = {".txt", ".pdf"}
+
+
+@app.post("/api/file/encrypt")
+async def encrypt_file(file: UploadFile = File(...)):
+    """
+    Encrypt an arbitrary binary file (.txt, .pdf) using Information-Theoretic One-Time Pad (OTP)
+    masking and compute an HMAC-SHA256 integrity digest.
+    """
+    filename = file.filename or "document.bin"
+    ext = Path(filename).suffix.lower()
+    if ext not in ALLOWED_FILE_EXTENSIONS:
+        return JSONResponse(
+            status_code=400,
+            content={"error": f"Unsupported file type '{ext}'. Allowed extensions: {', '.join(sorted(ALLOWED_FILE_EXTENSIONS))}"}
+        )
+
+    # Ingest in-memory using BytesIO buffer
+    buffer = io.BytesIO()
+    while chunk := await file.read(65536):
+        buffer.write(chunk)
+        if buffer.tell() > MAX_FILE_SIZE:
+            return JSONResponse(
+                status_code=413,
+                content={"error": f"File exceeds maximum allowed size of {MAX_FILE_SIZE // (1024 * 1024)} MB"}
+            )
+
+    content = buffer.getvalue()
+    size_bytes = len(content)
+
+    # Compute HMAC-SHA256 over original plaintext bytes
+    original_hmac = compute_file_hmac(content, HMAC_KEY)
+
+    # Generate exact length one-time pad from physical/CSPRNG entropy
+    pad_bytes = generate_file_pad(size_bytes)
+
+    # Fast bitwise XOR OTP masking: C = M ^ K
+    cipher_bytes = xor_bytes(content, pad_bytes)
+
+    preview_len = min(32, size_bytes)
+    return JSONResponse({
+        "filename": filename,
+        "size_bytes": size_bytes,
+        "original_hmac": original_hmac,
+        "ciphertext_b64": base64.b64encode(cipher_bytes).decode("utf-8"),
+        "pad_b64": base64.b64encode(pad_bytes).decode("utf-8"),
+        "preview_original_hex": content[:preview_len].hex().upper(),
+        "preview_pad_hex": pad_bytes[:preview_len].hex().upper(),
+        "preview_cipher_hex": cipher_bytes[:preview_len].hex().upper(),
+    })
+
+
+@app.post("/api/file/decrypt")
+async def decrypt_file(
+    ciphertext_file: Optional[UploadFile] = File(None),
+    pad_file: Optional[UploadFile] = File(None),
+    ciphertext_b64: Optional[str] = Form(None),
+    pad_b64: Optional[str] = Form(None),
+    expected_hmac: str = Form(...),
+    filename: str = Form("restored_file.bin"),
+):
+    """
+    Decrypt an arbitrary file using the OTP pad and verify HMAC-SHA256 integrity.
+    Supports either file uploads or base64 form fields.
+    """
+    # 1. Ingest ciphertext bytes
+    if ciphertext_file is not None:
+        cipher_bytes = await ciphertext_file.read()
+    elif ciphertext_b64:
+        try:
+            cipher_bytes = base64.b64decode(ciphertext_b64)
+        except Exception as e:
+            return JSONResponse(status_code=400, content={"error": f"Invalid ciphertext base64: {e}"})
+    else:
+        return JSONResponse(status_code=400, content={"error": "Missing ciphertext data."})
+
+    # 2. Ingest pad bytes
+    if pad_file is not None:
+        pad_bytes = await pad_file.read()
+    elif pad_b64:
+        try:
+            pad_bytes = base64.b64decode(pad_b64)
+        except Exception as e:
+            return JSONResponse(status_code=400, content={"error": f"Invalid pad base64: {e}"})
+    else:
+        return JSONResponse(status_code=400, content={"error": "Missing pad data."})
+
+    if len(cipher_bytes) != len(pad_bytes):
+        return JSONResponse(
+            status_code=422,
+            content={
+                "status": "INTEGRITY_FAILED",
+                "error": f"Length mismatch: Ciphertext is {len(cipher_bytes)} bytes, but Pad is {len(pad_bytes)} bytes."
+            }
+        )
+
+    # 3. OTP Bitwise XOR unmasking: M = C ^ K
+    restored_bytes = xor_bytes(cipher_bytes, pad_bytes)
+
+    # 4. Recompute HMAC and verify with constant-time comparison
+    recomputed_hmac = compute_file_hmac(restored_bytes, HMAC_KEY)
+    clean_expected = expected_hmac.strip().lower()
+    if not hmac.compare_digest(recomputed_hmac.lower(), clean_expected):
+        return JSONResponse(
+            status_code=422,
+            content={
+                "status": "INTEGRITY_FAILED",
+                "error": "Integrity violation: Key pad mismatch or corrupted ciphertext.",
+                "expected_hmac": clean_expected,
+                "recomputed_hmac": recomputed_hmac,
+            }
+        )
+
+    # 5. Determine restored filename and media type
+    clean_name = Path(filename).name
+
+    # Strip .enc or .pad extension if present
+    if clean_name.lower().endswith(".enc"):
+        clean_name = clean_name[:-4]
+    elif clean_name.lower().endswith(".pad"):
+        clean_name = clean_name[:-4]
+
+    # Auto-detect file format from magic bytes or existing extension
+    is_pdf = restored_bytes.startswith(b"%PDF") or clean_name.lower().endswith(".pdf")
+    
+    if is_pdf:
+        media_type = "application/pdf"
+        if not clean_name.lower().endswith(".pdf"):
+            clean_name = f"{Path(clean_name).stem}.pdf"
+    else:
+        # Check if text
+        try:
+            restored_bytes.decode("utf-8")
+            media_type = "text/plain; charset=utf-8"
+            if not clean_name.lower().endswith(".txt"):
+                clean_name = f"{Path(clean_name).stem}.txt"
+        except UnicodeDecodeError:
+            media_type = "application/octet-stream"
+
+    if not clean_name.startswith("restored_"):
+        clean_filename = f"restored_{clean_name}"
+    else:
+        clean_filename = clean_name
+
+    headers = {
+        "Content-Disposition": f'attachment; filename="{clean_filename}"',
+        "X-Original-Filename": clean_filename,
+        "X-Verified-HMAC": recomputed_hmac,
+        "Access-Control-Expose-Headers": "Content-Disposition, X-Original-Filename, X-Verified-HMAC",
+    }
+
+    return StreamingResponse(
+        io.BytesIO(restored_bytes),
+        media_type=media_type,
+        headers=headers,
+    )
+
+
+@app.post("/api/file/tamper-sim")
+async def tamper_sim(
+    request: Request,
+    ciphertext_file: Optional[UploadFile] = File(None),
+    pad_file: Optional[UploadFile] = File(None),
+    ciphertext_b64: Optional[str] = Form(None),
+    pad_b64: Optional[str] = Form(None),
+    expected_hmac: Optional[str] = Form(None),
+):
+    """
+    Deliberately flip 1 bit in the ciphertext or corrupt 1 byte in the pad,
+    then attempt integrity verification to demonstrate tamper detection on demand.
+    Supports either multipart file uploads or JSON payload.
+    """
+    cipher_bytes = b""
+    pad_bytes = b""
+    clean_expected = (expected_hmac or "").strip().lower()
+
+    # 1. Check multipart file upload
+    if ciphertext_file is not None:
+        cipher_bytes = await ciphertext_file.read()
+    elif ciphertext_b64:
+        try:
+            cipher_bytes = base64.b64decode(ciphertext_b64)
+        except Exception:
+            pass
+
+    if pad_file is not None:
+        pad_bytes = await pad_file.read()
+    elif pad_b64:
+        try:
+            pad_bytes = base64.b64decode(pad_b64)
+        except Exception:
+            pass
+
+    # 2. Fallback to JSON body if not multipart
+    if not cipher_bytes or not pad_bytes:
+        try:
+            body = await request.json()
+            cb64 = body.get("ciphertext_b64") or ""
+            pb64 = body.get("pad_b64") or ""
+            if cb64 and pb64:
+                cipher_bytes = base64.b64decode(cb64)
+                pad_bytes = base64.b64decode(pb64)
+            if not clean_expected:
+                clean_expected = (body.get("expected_hmac") or "").strip().lower()
+        except Exception:
+            pass
+
+    if not cipher_bytes or not pad_bytes:
+        return JSONResponse(status_code=400, content={"error": "Missing ciphertext or pad data in request."})
+
+    # Deliberately flip 1 bit (XOR with 0x01) at byte 0
+    tampered_cipher = bytearray(cipher_bytes)
+    tampered_cipher[0] ^= 0x01
+
+    # Unmask with tampered ciphertext
+    corrupted_plaintext = xor_bytes(bytes(tampered_cipher), bytes(pad_bytes))
+    tampered_hmac = compute_file_hmac(corrupted_plaintext, HMAC_KEY)
+
+    return JSONResponse(
+        status_code=422,
+        content={
+            "status": "INTEGRITY_FAILED",
+            "tampered": True,
+            "tamper_detail": "Deliberate single-bit flip injected at byte 0 (bit 0 inverted)",
+            "expected_hmac": clean_expected,
+            "recomputed_hmac": tampered_hmac,
+            "error": "Integrity violation: Key pad mismatch or corrupted ciphertext.",
+        }
+    )
 
 
 @app.post("/api/tamper")

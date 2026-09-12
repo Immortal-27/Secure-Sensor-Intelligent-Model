@@ -1208,3 +1208,529 @@
         init();
     }
 })();
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ARBITRARY FILE ENTROPY VAULT CONTROLLER
+   Physical One-Time Pad Masking & HMAC-SHA256 Document Verification
+   ═══════════════════════════════════════════════════════════════════════════ */
+(function initFileEntropyVault() {
+    // Session state
+    const state = {
+        selectedSourceFile: null,
+        cipherFile: null,
+        padFile: null,
+        cipherBlob: null,
+        padBlob: null,
+        cipherB64: null,
+        padB64: null,
+        expectedHmac: "",
+        originalFilename: "",
+        restoredBlob: null,
+        restoredFilename: "",
+    };
+
+    function $(id) {
+        return document.getElementById(id);
+    }
+
+    function formatBytes(bytes, decimals = 2) {
+        if (bytes === 0) return '0 Bytes';
+        const k = 1024;
+        const dm = decimals < 0 ? 0 : decimals;
+        const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+    }
+
+    function b64ToBlob(b64Data, contentType = 'application/octet-stream') {
+        const byteCharacters = atob(b64Data);
+        const byteArrays = [];
+        const sliceSize = 65536;
+        for (let offset = 0; offset < byteCharacters.length; offset += sliceSize) {
+            const slice = byteCharacters.slice(offset, offset + sliceSize);
+            const byteNumbers = new Array(slice.length);
+            for (let i = 0; i < slice.length; i++) {
+                byteNumbers[i] = slice.charCodeAt(i);
+            }
+            const byteArray = new Uint8Array(byteNumbers);
+            byteArrays.push(byteArray);
+        }
+        return new Blob(byteArrays, { type: contentType });
+    }
+
+    function triggerDownload(blob, filename) {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => {
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }, 100);
+    }
+
+    function setupVault() {
+        const dropzone = $('vault-dropzone');
+        const fileInput = $('vault-file-input');
+        const btnBrowse = $('btn-browse-file');
+        const fileBadge = $('file-badge');
+        const badgeName = $('badge-filename');
+        const badgeSize = $('badge-filesize');
+        const badgeMime = $('badge-mimetype');
+        const btnEncrypt = $('btn-encrypt-file');
+
+        const resultBox = $('encrypt-result-box');
+        const hmacDisplay = $('enc-hmac-display');
+        const hexPlain = $('hex-preview-plain');
+        const hexPad = $('hex-preview-pad');
+        const hexCipher = $('hex-preview-cipher');
+        const btnDownloadEnc = $('btn-download-enc');
+        const btnDownloadPad = $('btn-download-pad');
+
+        const dropEnc = $('drop-target-enc');
+        const inputEnc = $('input-file-enc');
+        const statusEnc = $('status-enc');
+
+        const dropPad = $('drop-target-pad');
+        const inputPad = $('input-file-pad');
+        const statusPad = $('status-pad');
+
+        const inputHmac = $('input-expected-hmac');
+        const btnDecrypt = $('btn-decrypt-verify');
+        const btnTamperSim = $('btn-tamper-sim');
+        const verifyBanner = $('vault-verify-banner');
+
+        const docViewer = $('doc-viewer-container');
+        const viewerTitle = $('viewer-title');
+        const btnViewerSave = $('btn-viewer-save');
+        const txtPreview = $('txt-preview');
+        const pdfPreview = $('pdfPreview');
+
+        if (!dropzone || !btnEncrypt) return;
+
+        // Prevent browser from opening dropped files outside dropzones
+        window.addEventListener('dragover', (e) => e.preventDefault(), false);
+        window.addEventListener('drop', (e) => e.preventDefault(), false);
+
+        // 1. Source File Drag & Drop
+        ['dragenter', 'dragover'].forEach(name => {
+            dropzone.addEventListener(name, (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                dropzone.classList.add('dragover');
+            });
+        });
+
+        ['dragleave', 'drop'].forEach(name => {
+            dropzone.addEventListener(name, (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                dropzone.classList.remove('dragover');
+            });
+        });
+
+        dropzone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                handleSourceFile(e.dataTransfer.files[0]);
+            }
+        });
+
+        if (btnBrowse) {
+            btnBrowse.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                fileInput.value = '';
+                fileInput.click();
+            });
+        }
+
+        dropzone.addEventListener('click', (e) => {
+            if (e.target !== btnBrowse) {
+                fileInput.value = '';
+                fileInput.click();
+            }
+        });
+
+        fileInput.addEventListener('click', (e) => {
+            e.stopPropagation();
+        });
+
+        fileInput.addEventListener('change', () => {
+            if (fileInput.files && fileInput.files.length > 0) {
+                handleSourceFile(fileInput.files[0]);
+            }
+        });
+
+        function handleSourceFile(file) {
+            if (!file) return;
+            const ext = file.name.split('.').pop().toLowerCase();
+            if (ext !== 'txt' && ext !== 'pdf') {
+                alert("Unsupported file format: ." + ext + "\nPlease choose a .txt or .pdf file.");
+                return;
+            }
+            if (file.size > 10 * 1024 * 1024) {
+                alert("File exceeds maximum allowed size of 10 MB (" + formatBytes(file.size) + ").");
+                return;
+            }
+
+            state.selectedSourceFile = file;
+            state.originalFilename = file.name;
+
+            badgeName.textContent = file.name;
+            badgeSize.textContent = formatBytes(file.size);
+            badgeMime.textContent = file.type || (ext === 'pdf' ? 'application/pdf' : 'text/plain');
+
+            fileBadge.classList.remove('hidden');
+            btnEncrypt.disabled = false;
+            btnEncrypt.classList.remove('disabled');
+        }
+
+        // 2. Encrypt with One-Time Pad
+        btnEncrypt.addEventListener('click', async () => {
+            if (!state.selectedSourceFile) return;
+
+            btnEncrypt.disabled = true;
+            btnEncrypt.innerHTML = '<span class="hud-bracket">[</span> ENCRYPTING WITH PHYSICAL OTP... <span class="hud-bracket">]</span>';
+
+            const formData = new FormData();
+            formData.append('file', state.selectedSourceFile);
+
+            try {
+                const res = await fetch('/api/file/encrypt', {
+                    method: 'POST',
+                    body: formData,
+                });
+
+                if (!res.ok) {
+                    const err = await res.json();
+                    throw new Error(err.error || 'Encryption failed with status ' + res.status);
+                }
+
+                const data = await res.json();
+
+                state.cipherB64 = data.ciphertext_b64;
+                state.padB64 = data.pad_b64;
+                // Convert to binary Blobs immediately to stream efficiently on decrypt
+                state.cipherBlob = b64ToBlob(data.ciphertext_b64, 'application/octet-stream');
+                state.padBlob = b64ToBlob(data.pad_b64, 'application/octet-stream');
+                state.expectedHmac = data.original_hmac;
+                state.cipherFile = null;
+                state.padFile = null;
+
+                // Update UI Result Box
+                hmacDisplay.textContent = data.original_hmac;
+                hexPlain.textContent = data.preview_original_hex || '—';
+                hexPad.textContent = data.preview_pad_hex || '—';
+                hexCipher.textContent = data.preview_cipher_hex || '—';
+                resultBox.classList.remove('hidden');
+
+                // Auto-fill right panel verification inputs
+                inputHmac.value = data.original_hmac;
+                dropEnc.classList.add('loaded');
+                statusEnc.textContent = `✓ ${data.filename}.enc (${formatBytes(data.size_bytes)})`;
+                dropPad.classList.add('loaded');
+                statusPad.textContent = `✓ ${data.filename}.pad (${formatBytes(data.size_bytes)})`;
+
+                btnEncrypt.innerHTML = '<span class="hud-bracket">[</span> ENCRYPT WITH ONE-TIME PAD <span class="hud-bracket">]</span>';
+                btnEncrypt.disabled = false;
+            } catch (err) {
+                console.error(err);
+                alert("Encryption error: " + err.message);
+                btnEncrypt.innerHTML = '<span class="hud-bracket">[</span> ENCRYPTION FAILED — RETRY <span class="hud-bracket">]</span>';
+                setTimeout(() => {
+                    btnEncrypt.innerHTML = '<span class="hud-bracket">[</span> ENCRYPT WITH ONE-TIME PAD <span class="hud-bracket">]</span>';
+                    btnEncrypt.disabled = false;
+                }, 2000);
+            }
+        });
+
+        // 3. Download Buttons
+        btnDownloadEnc.addEventListener('click', () => {
+            const blob = state.cipherBlob || (state.cipherB64 ? b64ToBlob(state.cipherB64) : null);
+            if (!blob) return;
+            triggerDownload(blob, `${state.originalFilename || 'document'}.enc`);
+        });
+
+        btnDownloadPad.addEventListener('click', () => {
+            const blob = state.padBlob || (state.padB64 ? b64ToBlob(state.padB64) : null);
+            if (!blob) return;
+            triggerDownload(blob, `${state.originalFilename || 'document'}.pad`);
+        });
+
+        // 4. Target 1: Ciphertext Upload
+        ['dragenter', 'dragover'].forEach(name => {
+            dropEnc.addEventListener(name, (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                dropEnc.classList.add('dragover');
+            });
+        });
+        ['dragleave', 'drop'].forEach(name => {
+            dropEnc.addEventListener(name, (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                dropEnc.classList.remove('dragover');
+            });
+        });
+        dropEnc.addEventListener('drop', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                handleCipherFile(e.dataTransfer.files[0]);
+            }
+        });
+        dropEnc.addEventListener('click', () => {
+            inputEnc.value = '';
+            inputEnc.click();
+        });
+        inputEnc.addEventListener('click', (e) => e.stopPropagation());
+        inputEnc.addEventListener('change', () => {
+            if (inputEnc.files && inputEnc.files.length > 0) handleCipherFile(inputEnc.files[0]);
+        });
+
+        function handleCipherFile(file) {
+            if (!file) return;
+            state.cipherFile = file;
+            state.cipherBlob = file;
+            let derivedName = file.name;
+            if (derivedName.toLowerCase().endsWith('.enc')) derivedName = derivedName.slice(0, -4);
+            if (derivedName.toLowerCase().endsWith('.pad')) derivedName = derivedName.slice(0, -4);
+            if (!state.originalFilename || state.originalFilename === 'document.bin') {
+                state.originalFilename = derivedName;
+            }
+            dropEnc.classList.add('loaded');
+            statusEnc.textContent = `✓ ${file.name} (${formatBytes(file.size)})`;
+        }
+
+        // 5. Target 2: Key Pad Upload
+        ['dragenter', 'dragover'].forEach(name => {
+            dropPad.addEventListener(name, (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                dropPad.classList.add('dragover');
+            });
+        });
+        ['dragleave', 'drop'].forEach(name => {
+            dropPad.addEventListener(name, (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                dropPad.classList.remove('dragover');
+            });
+        });
+        dropPad.addEventListener('drop', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                handlePadFile(e.dataTransfer.files[0]);
+            }
+        });
+        dropPad.addEventListener('click', () => {
+            inputPad.value = '';
+            inputPad.click();
+        });
+        inputPad.addEventListener('click', (e) => e.stopPropagation());
+        inputPad.addEventListener('change', () => {
+            if (inputPad.files && inputPad.files.length > 0) handlePadFile(inputPad.files[0]);
+        });
+
+        function handlePadFile(file) {
+            state.padFile = file;
+            state.padBlob = file;
+            let derivedName = file.name;
+            if (derivedName.toLowerCase().endsWith('.pad')) derivedName = derivedName.slice(0, -4);
+            if (derivedName.toLowerCase().endsWith('.enc')) derivedName = derivedName.slice(0, -4);
+            if (!state.originalFilename || state.originalFilename === 'document.bin') {
+                state.originalFilename = derivedName;
+            }
+            dropPad.classList.add('loaded');
+            statusPad.textContent = `✓ ${file.name} (${formatBytes(file.size)})`;
+        }
+
+        // 6. Decrypt & Verify Integrity
+        btnDecrypt.addEventListener('click', async () => {
+            const hmacVal = (inputHmac.value || "").trim();
+            if (!hmacVal) {
+                alert("Please provide the Expected HMAC-SHA256 hex digest.");
+                inputHmac.focus();
+                return;
+            }
+
+            const cipherPayload = state.cipherFile || state.cipherBlob;
+            const padPayload = state.padFile || state.padBlob;
+
+            if (!cipherPayload) {
+                alert("Please provide the Ciphertext (.enc) file.");
+                return;
+            }
+            if (!padPayload) {
+                alert("Please provide the Key Pad (.pad) file.");
+                return;
+            }
+
+            let baseName = state.originalFilename || "document.bin";
+            if (baseName.toLowerCase().endsWith('.enc')) baseName = baseName.slice(0, -4);
+            if (baseName.toLowerCase().endsWith('.pad')) baseName = baseName.slice(0, -4);
+
+            btnDecrypt.disabled = true;
+            btnDecrypt.innerHTML = '<span class="hud-bracket">[</span> VERIFYING HMAC &amp; DECRYPTING... <span class="hud-bracket">]</span>';
+
+            const formData = new FormData();
+            formData.append('expected_hmac', hmacVal);
+            formData.append('filename', baseName);
+            // Stream as files to bypass the 1024KB form text field limit
+            formData.append('ciphertext_file', cipherPayload, `${baseName}.enc`);
+            formData.append('pad_file', padPayload, `${baseName}.pad`);
+
+            try {
+                const res = await fetch('/api/file/decrypt', {
+                    method: 'POST',
+                    body: formData,
+                });
+
+                if (res.status === 200) {
+                    const blob = await res.blob();
+                    const disposition = res.headers.get('Content-Disposition') || '';
+                    let outName = '';
+                    const fnMatch = disposition.match(/filename\*?=(?:UTF-8'')?"?([^";]+)"?/i);
+                    if (fnMatch && fnMatch[1]) {
+                        outName = decodeURIComponent(fnMatch[1].replace(/['"]/g, ''));
+                    }
+                    if (!outName) {
+                        let base = state.originalFilename || 'document';
+                        if (base.toLowerCase().endsWith('.enc')) base = base.slice(0, -4);
+                        if (base.toLowerCase().endsWith('.pad')) base = base.slice(0, -4);
+                        outName = `restored_${base}`;
+                    }
+
+                    // Check if PDF or TXT by inspecting MIME type or filename
+                    const isPdf = res.headers.get('Content-Type')?.includes('pdf') || outName.toLowerCase().endsWith('.pdf');
+                    const isTxt = res.headers.get('Content-Type')?.includes('text') || outName.toLowerCase().endsWith('.txt');
+
+                    if (isPdf && !outName.toLowerCase().endsWith('.pdf')) {
+                        outName = `${outName.replace(/\.[^/.]+$/, "")}.pdf`;
+                    } else if (isTxt && !outName.toLowerCase().endsWith('.txt')) {
+                        outName = `${outName.replace(/\.[^/.]+$/, "")}.txt`;
+                    }
+
+                    const typedBlob = new Blob([blob], {
+                        type: isPdf ? 'application/pdf' : isTxt ? 'text/plain; charset=utf-8' : 'application/octet-stream'
+                    });
+
+                    state.restoredBlob = typedBlob;
+                    state.restoredFilename = outName;
+
+                    // Automatically download the restored file with original format
+                    triggerDownload(typedBlob, outName);
+
+                    // Show success banner
+                    verifyBanner.className = 'vault-banner verified';
+                    verifyBanner.innerHTML = `✓ HMAC VERIFIED — 100% BIT-FOR-BIT RECOVERY (${outName} DOWNLOADED)`;
+                    verifyBanner.classList.remove('hidden');
+
+                    // Render Document Viewer
+                    const ext = outName.split('.').pop().toLowerCase();
+                    viewerTitle.textContent = `RECOVERED: ${outName} (${formatBytes(blob.size)})`;
+
+                    if (ext === 'txt') {
+                        const reader = new FileReader();
+                        reader.onload = function(evt) {
+                            txtPreview.textContent = evt.target.result;
+                            txtPreview.classList.remove('hidden');
+                            pdfPreview.classList.add('hidden');
+                            docViewer.classList.remove('hidden');
+                        };
+                        reader.readAsText(typedBlob);
+                    } else if (ext === 'pdf') {
+                        const reader = new FileReader();
+                        reader.onload = function(evt) {
+                            pdfPreview.src = evt.target.result;
+                            pdfPreview.classList.remove('hidden');
+                            txtPreview.classList.add('hidden');
+                            docViewer.classList.remove('hidden');
+                        };
+                        reader.readAsDataURL(typedBlob);
+                    } else {
+                        txtPreview.classList.add('hidden');
+                        pdfPreview.classList.add('hidden');
+                        docViewer.classList.remove('hidden');
+                    }
+                } else if (res.status === 422) {
+                    const errData = await res.json();
+                    showIntegrityViolation(errData.error || "Integrity violation: Key pad mismatch or corrupted ciphertext.");
+                } else {
+                    const errData = await res.json().catch(() => ({}));
+                    alert("Decryption error: " + (errData.detail || errData.error || "Server returned status " + res.status));
+                }
+            } catch (err) {
+                console.error(err);
+                alert("Network or decoding error: " + err.message);
+            } finally {
+                btnDecrypt.innerHTML = '<span class="hud-bracket">[</span> DECRYPT &amp; VERIFY INTEGRITY <span class="hud-bracket">]</span>';
+                btnDecrypt.disabled = false;
+            }
+        });
+
+        function showIntegrityViolation(msg) {
+            verifyBanner.className = 'vault-banner violation';
+            verifyBanner.innerHTML = '✕ INTEGRITY VIOLATION DETECTED — DECRYPTION REJECTED';
+            verifyBanner.classList.remove('hidden');
+            docViewer.classList.add('hidden');
+        }
+
+        // 7. Save Restored Document
+        btnViewerSave.addEventListener('click', () => {
+            if (state.restoredBlob) {
+                triggerDownload(state.restoredBlob, state.restoredFilename || 'restored_document');
+            }
+        });
+
+        // 8. Simulate Single-Bit Tampering
+        btnTamperSim.addEventListener('click', async () => {
+            const cipherPayload = state.cipherFile || state.cipherBlob;
+            const padPayload = state.padFile || state.padBlob;
+
+            if (!cipherPayload || !padPayload) {
+                alert("Please provide both ciphertext and pad before simulating tampering.");
+                return;
+            }
+
+            btnTamperSim.disabled = true;
+            btnTamperSim.innerHTML = '<span class="hud-bracket">[</span> INJECTING BIT FLIP... <span class="hud-bracket">]</span>';
+
+            const formData = new FormData();
+            formData.append('ciphertext_file', cipherPayload, `${state.originalFilename || 'document'}.enc`);
+            formData.append('pad_file', padPayload, `${state.originalFilename || 'document'}.pad`);
+            formData.append('expected_hmac', (inputHmac.value || "").trim());
+
+            try {
+                const res = await fetch('/api/file/tamper-sim', {
+                    method: 'POST',
+                    body: formData,
+                });
+
+                const data = await res.json();
+                verifyBanner.className = 'vault-banner violation';
+                verifyBanner.innerHTML = '✕ INTEGRITY VIOLATION DETECTED — DECRYPTION REJECTED (SINGLE-BIT TAMPER INJECTED)';
+                verifyBanner.classList.remove('hidden');
+                docViewer.classList.add('hidden');
+            } catch (err) {
+                console.error(err);
+                showIntegrityViolation(err.message);
+            } finally {
+                btnTamperSim.innerHTML = '<span class="hud-bracket">[</span> SIMULATE SINGLE-BIT TAMPERING <span class="hud-bracket">]</span>';
+                btnTamperSim.disabled = false;
+            }
+        });
+    }
+
+    if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", setupVault);
+    } else {
+        setupVault();
+    }
+})();
+

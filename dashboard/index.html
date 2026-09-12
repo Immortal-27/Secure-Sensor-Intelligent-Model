@@ -129,6 +129,150 @@
             <!-- Dynamically populated by app.js -->
         </div>
 
+        <!-- ═══════ ARBITRARY FILE ENTROPY VAULT ═══════ -->
+        <div class="vault-section-container">
+            <div class="section-title">
+                Arbitrary File Entropy Vault 
+                <span style="font-size: 0.65rem; color: #06b6d4; font-weight: normal; letter-spacing: 0.05em; margin-left: 8px;">[ PHYSICAL OTP MASKING &amp; HMAC-SHA256 INTEGRITY — .TXT &amp; .PDF ]</span>
+            </div>
+
+            <div class="glass-card vault-card" id="vault-card">
+                <div class="vault-grid">
+                    <!-- Left Panel: File Ingestion & Masking -->
+                    <div class="vault-panel vault-panel-left">
+                        <div class="panel-header">
+                            <span class="panel-tag">[ INGESTION &amp; MASKING ]</span>
+                            <span class="panel-title">Information-Theoretic Pad Encryption</span>
+                        </div>
+
+                        <!-- Drop Zone -->
+                        <div class="file-dropzone" id="vault-dropzone">
+                            <input type="file" id="vault-file-input" accept=".txt,.pdf" style="display: none;" />
+                            <div class="dropzone-icon">⇪</div>
+                            <div class="dropzone-prompt">Drag &amp; drop <strong>.TXT</strong> or <strong>.PDF</strong> file here</div>
+                            <div class="dropzone-sub">or <button type="button" class="btn-browse" id="btn-browse-file">Browse Computer</button> (Max 10 MB)</div>
+                        </div>
+
+                        <!-- File Details Badge -->
+                        <div class="file-badge hidden" id="file-badge">
+                            <div class="badge-row">
+                                <span class="badge-label">NAME:</span>
+                                <span class="badge-val" id="badge-filename">—</span>
+                            </div>
+                            <div class="badge-row">
+                                <span class="badge-label">SIZE:</span>
+                                <span class="badge-val" id="badge-filesize">—</span>
+                                <span class="badge-label" style="margin-left: 12px;">MIME:</span>
+                                <span class="badge-val" id="badge-mimetype">—</span>
+                            </div>
+                        </div>
+
+                        <!-- Action Button -->
+                        <button type="button" class="hud-btn vault-action-btn" id="btn-encrypt-file" disabled>
+                            <span class="hud-bracket">[</span> ENCRYPT WITH ONE-TIME PAD <span class="hud-bracket">]</span>
+                        </button>
+
+                        <!-- Encryption Result Box -->
+                        <div class="vault-result-box hidden" id="encrypt-result-box">
+                            <div class="result-header">
+                                <span class="result-title">ORIGINAL SHA-256 HMAC TAG</span>
+                                <span class="result-tag">[ PRE-ENCRYPTION DIGEST ]</span>
+                            </div>
+                            <div class="hmac-pill-display" id="enc-hmac-display">—</div>
+
+                            <!-- Side-by-side Hex Inspector -->
+                            <div class="hex-inspector-container">
+                                <div class="hex-inspector-title">HEX INSPECTOR (FIRST 32 BYTES)</div>
+                                <div class="hex-row">
+                                    <span class="hex-tag">PLAINTEXT (M):</span>
+                                    <span class="hex-bytes" id="hex-preview-plain">—</span>
+                                </div>
+                                <div class="hex-row">
+                                    <span class="hex-tag">RANDOM PAD (K):</span>
+                                    <span class="hex-bytes pad-color" id="hex-preview-pad">—</span>
+                                </div>
+                                <div class="hex-row">
+                                    <span class="hex-tag">CIPHERTEXT (C):</span>
+                                    <span class="hex-bytes cipher-color" id="hex-preview-cipher">—</span>
+                                </div>
+                            </div>
+
+                            <!-- Download Controls -->
+                            <div class="vault-download-bar">
+                                <button type="button" class="hud-btn download-btn" id="btn-download-enc">
+                                    <span class="hud-bracket">[</span> DOWNLOAD .ENC <span class="hud-bracket">]</span>
+                                </button>
+                                <button type="button" class="hud-btn download-btn" id="btn-download-pad">
+                                    <span class="hud-bracket">[</span> DOWNLOAD .PAD <span class="hud-bracket">]</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Right Panel: Decryption & Tamper Verification -->
+                    <div class="vault-panel vault-panel-right">
+                        <div class="panel-header">
+                            <span class="panel-tag">[ RECOVERY &amp; AUDIT ]</span>
+                            <span class="panel-title">Decryption &amp; Tamper Verification</span>
+                        </div>
+
+                        <!-- Dual Upload Drop-zones -->
+                        <div class="dual-drop-grid">
+                            <!-- Drop Target 1: Ciphertext -->
+                            <div class="dual-drop-target" id="drop-target-enc">
+                                <input type="file" id="input-file-enc" accept=".enc,.bin,*/*" style="display: none;" />
+                                <div class="target-title">TARGET 1: CIPHERTEXT (.ENC)</div>
+                                <div class="target-status" id="status-enc">Click or drop .enc file</div>
+                            </div>
+
+                            <!-- Drop Target 2: Key Pad -->
+                            <div class="dual-drop-target" id="drop-target-pad">
+                                <input type="file" id="input-file-pad" accept=".pad,.bin,*/*" style="display: none;" />
+                                <div class="target-title">TARGET 2: KEY PAD (.PAD)</div>
+                                <div class="target-status" id="status-pad">Click or drop .pad file</div>
+                            </div>
+                        </div>
+
+                        <!-- Expected HMAC Input -->
+                        <div class="hmac-input-group">
+                            <label class="hmac-input-label" for="input-expected-hmac">
+                                EXPECTED HMAC-SHA256 (HEX)
+                                <span class="hmac-input-sub">[ AUTO-FILLED ON LOCAL ENCRYPTION ]</span>
+                            </label>
+                            <input type="text" class="vault-text-input" id="input-expected-hmac" placeholder="64-character SHA-256 HMAC hex digest..." autocomplete="off" spellcheck="false" />
+                        </div>
+
+                        <!-- Action Controls -->
+                        <div class="vault-actions-row">
+                            <button type="button" class="hud-btn decrypt-btn" id="btn-decrypt-verify">
+                                <span class="hud-bracket">[</span> DECRYPT &amp; VERIFY INTEGRITY <span class="hud-bracket">]</span>
+                            </button>
+                            <button type="button" class="hud-btn tamper-sim-btn" id="btn-tamper-sim">
+                                <span class="hud-bracket">[</span> SIMULATE SINGLE-BIT TAMPERING <span class="hud-bracket">]</span>
+                            </button>
+                        </div>
+
+                        <!-- Dynamic Verification Banner -->
+                        <div class="vault-banner hidden" id="vault-verify-banner">
+                            <!-- Injected dynamically -->
+                        </div>
+
+                        <!-- In-Dashboard Document Viewer -->
+                        <div class="doc-viewer-card hidden" id="doc-viewer-container">
+                            <div class="doc-viewer-header">
+                                <span class="viewer-title" id="viewer-title">RECOVERED DOCUMENT PREVIEW</span>
+                                <button type="button" class="btn-viewer-download" id="btn-viewer-save">SAVE FILE</button>
+                            </div>
+                            <!-- Monospace terminal for .txt -->
+                            <pre class="txt-viewer-terminal hidden" id="txt-preview"></pre>
+                            <!-- Embedded iframe for .pdf -->
+                            <iframe class="pdf-viewer-frame hidden" id="pdfPreview" title="Decrypted PDF Preview"></iframe>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- ═══════ INTEGRITY + ENTROPY PANELS ═══════ -->
         <div class="integrity-section">
             <!-- Integrity Panel -->

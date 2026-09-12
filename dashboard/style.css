@@ -1445,3 +1445,483 @@ body::before {
     0%   { background: rgba(245, 158, 11, 0.25); color: #ffffff; }
     100% { background: transparent; }
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ARBITRARY FILE ENTROPY VAULT STYLING
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.vault-section-container {
+    margin-top: 24px;
+    margin-bottom: 24px;
+}
+
+.vault-card {
+    background: #080c14 !important;
+    border: 1px solid rgba(6, 182, 212, 0.25) !important;
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.6), 0 0 15px rgba(6, 182, 212, 0.08);
+    border-radius: 6px;
+    padding: 20px;
+}
+
+.vault-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 22px;
+}
+
+@media (max-width: 960px) {
+    .vault-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+.vault-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    background: rgba(12, 18, 30, 0.45);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 4px;
+    padding: 16px;
+}
+
+.panel-header {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    padding-bottom: 8px;
+}
+
+.panel-tag {
+    font-family: 'Share Tech Mono', 'JetBrains Mono', monospace;
+    font-size: 0.7rem;
+    color: #06b6d4;
+    letter-spacing: 0.08em;
+    font-weight: 600;
+}
+
+.panel-title {
+    font-family: 'Share Tech Mono', 'JetBrains Mono', monospace;
+    font-size: 0.95rem;
+    color: #f1f5f9;
+    letter-spacing: 0.04em;
+    font-weight: 700;
+}
+
+/* Drop Zone */
+.file-dropzone {
+    border: 2px dashed rgba(6, 182, 212, 0.35);
+    border-radius: 6px;
+    padding: 24px 16px;
+    text-align: center;
+    background: rgba(6, 182, 212, 0.02);
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.file-dropzone:hover,
+.file-dropzone.dragover {
+    border-color: #06b6d4;
+    background: rgba(6, 182, 212, 0.08);
+    box-shadow: 0 0 12px rgba(6, 182, 212, 0.2);
+}
+
+.dropzone-icon {
+    font-size: 1.8rem;
+    color: #06b6d4;
+    margin-bottom: 6px;
+}
+
+.dropzone-prompt {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.85rem;
+    color: #cbd5e1;
+}
+
+.dropzone-prompt strong {
+    color: #38bdf8;
+}
+
+.dropzone-sub {
+    font-size: 0.72rem;
+    color: #64748b;
+    margin-top: 4px;
+    font-family: 'JetBrains Mono', monospace;
+}
+
+.btn-browse {
+    background: transparent;
+    border: none;
+    color: #06b6d4;
+    text-decoration: underline;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: inherit;
+    padding: 0;
+}
+
+.btn-browse:hover {
+    color: #38bdf8;
+}
+
+/* File Details Badge */
+.file-badge {
+    background: rgba(15, 23, 42, 0.8);
+    border: 1px solid rgba(6, 182, 212, 0.2);
+    border-radius: 4px;
+    padding: 8px 12px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.75rem;
+}
+
+.badge-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 2px;
+}
+
+.badge-row:last-child {
+    margin-bottom: 0;
+}
+
+.badge-label {
+    color: #64748b;
+    font-weight: 600;
+}
+
+.badge-val {
+    color: #38bdf8;
+}
+
+/* Result Box */
+.vault-result-box {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    background: rgba(10, 15, 26, 0.8);
+    border: 1px solid rgba(16, 185, 129, 0.25);
+    border-radius: 4px;
+    padding: 12px;
+}
+
+.result-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.72rem;
+}
+
+.result-title {
+    color: #10b981;
+    font-weight: bold;
+    letter-spacing: 0.05em;
+}
+
+.result-tag {
+    color: #64748b;
+    font-size: 0.65rem;
+}
+
+.hmac-pill-display {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.74rem;
+    color: #10b981;
+    background: rgba(16, 185, 129, 0.08);
+    border: 1px solid rgba(16, 185, 129, 0.2);
+    border-radius: 3px;
+    padding: 6px 8px;
+    word-break: break-all;
+    letter-spacing: 0.04em;
+    user-select: all;
+}
+
+/* Hex Inspector */
+.hex-inspector-container {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    background: rgba(5, 8, 15, 0.9);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 3px;
+    padding: 8px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.7rem;
+}
+
+.hex-inspector-title {
+    color: #94a3b8;
+    font-size: 0.65rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    padding-bottom: 4px;
+}
+
+.hex-row {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.hex-tag {
+    color: #64748b;
+    font-size: 0.63rem;
+}
+
+.hex-bytes {
+    color: #cbd5e1;
+    word-break: break-all;
+    letter-spacing: 0.06em;
+}
+
+.hex-bytes.pad-color {
+    color: #06b6d4;
+}
+
+.hex-bytes.cipher-color {
+    color: #f59e0b;
+}
+
+.vault-download-bar {
+    display: flex;
+    gap: 8px;
+}
+
+.download-btn {
+    flex: 1;
+    font-size: 0.75rem !important;
+    padding: 6px 10px !important;
+    color: #38bdf8 !important;
+    border-color: rgba(56, 189, 248, 0.3) !important;
+}
+
+.download-btn:hover {
+    border-color: #38bdf8 !important;
+    background: rgba(56, 189, 248, 0.1) !important;
+}
+
+/* Right Panel: Dual Targets */
+.dual-drop-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+}
+
+.dual-drop-target {
+    border: 1px dashed rgba(255, 255, 255, 0.15);
+    border-radius: 4px;
+    padding: 14px 10px;
+    text-align: center;
+    background: rgba(255, 255, 255, 0.02);
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.dual-drop-target:hover,
+.dual-drop-target.dragover {
+    border-color: #06b6d4;
+    background: rgba(6, 182, 212, 0.06);
+}
+
+.dual-drop-target.loaded {
+    border-color: #10b981;
+    border-style: solid;
+    background: rgba(16, 185, 129, 0.05);
+}
+
+.target-title {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.68rem;
+    color: #94a3b8;
+    font-weight: 600;
+}
+
+.target-status {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.72rem;
+    color: #64748b;
+    margin-top: 4px;
+    word-break: break-word;
+}
+
+.dual-drop-target.loaded .target-status {
+    color: #10b981;
+    font-weight: 600;
+}
+
+/* HMAC text input */
+.hmac-input-group {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.hmac-input-label {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.68rem;
+    color: #94a3b8;
+    display: flex;
+    justify-content: space-between;
+}
+
+.hmac-input-sub {
+    color: #06b6d4;
+    font-size: 0.62rem;
+}
+
+.vault-text-input {
+    background: rgba(10, 14, 24, 0.9);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 3px;
+    color: #f1f5f9;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.75rem;
+    padding: 8px 10px;
+    outline: none;
+    transition: border-color 0.2s ease;
+}
+
+.vault-text-input:focus {
+    border-color: #06b6d4;
+    box-shadow: 0 0 8px rgba(6, 182, 212, 0.25);
+}
+
+/* Action row */
+.vault-actions-row {
+    display: flex;
+    gap: 10px;
+}
+
+.decrypt-btn {
+    flex: 1.2;
+    background: rgba(16, 185, 129, 0.1) !important;
+    border-color: rgba(16, 185, 129, 0.4) !important;
+    color: #10b981 !important;
+    font-size: 0.8rem !important;
+}
+
+.decrypt-btn:hover:not(:disabled) {
+    border-color: #10b981 !important;
+    box-shadow: 0 0 14px rgba(16, 185, 129, 0.3) !important;
+}
+
+.tamper-sim-btn {
+    flex: 1;
+    background: rgba(244, 63, 94, 0.08) !important;
+    border-color: rgba(244, 63, 94, 0.35) !important;
+    color: #f43f5e !important;
+    font-size: 0.75rem !important;
+}
+
+.tamper-sim-btn:hover:not(:disabled) {
+    border-color: #f43f5e !important;
+    box-shadow: 0 0 14px rgba(244, 63, 94, 0.35) !important;
+}
+
+/* Verification Banner */
+.vault-banner {
+    padding: 12px 14px;
+    border-radius: 4px;
+    font-family: 'Share Tech Mono', 'JetBrains Mono', monospace;
+    font-size: 0.82rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-align: center;
+}
+
+.vault-banner.verified {
+    background: #10b981;
+    color: #042f1d;
+    box-shadow: 0 0 16px rgba(16, 185, 129, 0.4);
+}
+
+.vault-banner.violation {
+    background: rgba(244, 63, 94, 0.25);
+    border: 1px solid #f43f5e;
+    color: #f43f5e;
+    box-shadow: 0 0 16px rgba(244, 63, 94, 0.4);
+    animation: flashAlert 0.7s infinite alternate;
+}
+
+@keyframes flashAlert {
+    from {
+        background: rgba(244, 63, 94, 0.15);
+        box-shadow: 0 0 8px rgba(244, 63, 94, 0.3);
+    }
+    to {
+        background: rgba(244, 63, 94, 0.35);
+        box-shadow: 0 0 20px rgba(244, 63, 94, 0.65);
+    }
+}
+
+/* Document Viewer */
+.doc-viewer-card {
+    display: flex;
+    flex-direction: column;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 4px;
+    background: #050810;
+    overflow: hidden;
+    margin-top: 4px;
+}
+
+.doc-viewer-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: rgba(15, 23, 42, 0.9);
+    padding: 6px 10px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.viewer-title {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.7rem;
+    color: #cbd5e1;
+    letter-spacing: 0.05em;
+}
+
+.btn-viewer-download {
+    background: rgba(6, 182, 212, 0.15);
+    border: 1px solid #06b6d4;
+    color: #06b6d4;
+    border-radius: 3px;
+    padding: 3px 8px;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.68rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.btn-viewer-download:hover {
+    background: #06b6d4;
+    color: #041018;
+}
+
+.txt-viewer-terminal {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.78rem;
+    color: #34d399;
+    background: #080c14;
+    padding: 12px;
+    margin: 0;
+    max-height: 250px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-all;
+    line-height: 1.45;
+}
+
+.pdf-viewer-frame {
+    width: 100%;
+    height: 320px;
+    border: none;
+    background: #1e293b;
+}
+
+.hidden {
+    display: none !important;
+}
