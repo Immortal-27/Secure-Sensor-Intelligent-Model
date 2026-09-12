@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Quantum-Resilient IoT Telemetry Pipeline — Real-time dashboard demonstrating information-theoretic OTP security with physical entropy from ESP32 hardware TRNG.">
+    <title>Quantum-Resilient IoT Telemetry Pipeline</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔐</text></svg>">
+</head>
+<body>
+    <div class="app-container">
+
+        <!-- ═══════ HEADER ═══════ -->
+        <header class="header">
+            <div class="header-left">
+                <div class="header-logo">🔐</div>
+                <div>
+                    <div class="header-title">Quantum-Resilient IoT Telemetry</div>
+                    <div class="header-subtitle">Information-Theoretic OTP · Physical Entropy · Shannon Security</div>
+                </div>
+            </div>
+            <div class="header-right">
+                <span class="badge badge-source">
+                    <span class="status-dot connecting" id="status-dot"></span>
+                    <span id="status-text">Connecting…</span>
+                </span>
+                <span class="badge badge-source">
+                    SRC: <span id="source-badge">—</span>
+                </span>
+                <span class="badge badge-packets" id="packet-count">PKT #0</span>
+            </div>
+        </header>
+
+        <!-- ═══════ DISCLAIMER ═══════ -->
+        <div class="disclaimer-banner">
+            <span class="icon">⚠️</span>
+            <span>
+                <strong>Educational Demonstration:</strong>
+                This dashboard implements an information-theoretic One-Time Pad (OTP) using physical entropy
+                from ESP32 hardware TRNG. It is <em>not</em> a replacement for production authenticated encryption
+                (AES-GCM, ChaCha20-Poly1305). The pad is transmitted alongside ciphertext for demonstration purposes only.
+                Shannon's theorem guarantees perfect secrecy when the pad is truly random, used once, and kept secret.
+            </span>
+        </div>
+
+        <!-- ═══════ PIPELINE FLOW ═══════ -->
+        <div class="glass-card pipeline-flow">
+            <div class="pipeline-step" title="ESP32 ADC / Virtual Sensor">
+                <span class="step-icon">📡</span>
+                <span class="step-label">Sensor</span>
+            </div>
+            <span class="pipeline-arrow">→</span>
+            <div class="pipeline-step" title="Threshold Quantization: float → discrete state">
+                <span class="step-icon">📊</span>
+                <span class="step-label">Quantize</span>
+            </div>
+            <span class="pipeline-arrow">→</span>
+            <div class="pipeline-step" title="HMAC-SHA256 integrity tag">
+                <span class="step-icon">🏷️</span>
+                <span class="step-label">HMAC Tag</span>
+            </div>
+            <span class="pipeline-arrow">→</span>
+            <div class="pipeline-step" title="OTP Mask: C = (x + K) mod 257">
+                <span class="step-icon">⊕</span>
+                <span class="step-label">OTP Mask</span>
+            </div>
+            <span class="pipeline-arrow">→</span>
+            <div class="pipeline-step" title="Transmit encrypted frame">
+                <span class="step-icon">📤</span>
+                <span class="step-label">Transmit</span>
+            </div>
+            <span class="pipeline-arrow">→</span>
+            <div class="pipeline-step" title="OTP Unmask: x = (C - K + 257) mod 257">
+                <span class="step-icon">⊖</span>
+                <span class="step-label">OTP Unmask</span>
+            </div>
+            <span class="pipeline-arrow">→</span>
+            <div class="pipeline-step" title="Recompute HMAC and verify integrity">
+                <span class="step-icon">✅</span>
+                <span class="step-label">Verify</span>
+            </div>
+        </div>
+
+        <!-- ═══════ CHANNEL GRID ═══════ -->
+        <div class="section-title">Live Channel Telemetry</div>
+        <div class="channel-grid" id="channel-grid">
+            <!-- Dynamically populated by app.js -->
+        </div>
+
+        <!-- ═══════ INTEGRITY + ENTROPY PANELS ═══════ -->
+        <div class="integrity-section">
+            <!-- Integrity Panel -->
+            <div class="glass-card integrity-panel">
+                <div class="section-title">Cryptographic Integrity Verification</div>
+
+                <div class="hmac-display">
+                    <div class="hmac-row">
+                        <span class="hmac-label">Original</span>
+                        <span class="hmac-value" id="hmac-original">Awaiting data…</span>
+                    </div>
+                    <div class="hmac-row">
+                        <span class="hmac-label">Recomputed</span>
+                        <span class="hmac-value" id="hmac-recomputed">Awaiting data…</span>
+                    </div>
+                </div>
+
+                <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
+                    <div class="integrity-badge verified" id="integrity-badge">
+                        Awaiting…
+                    </div>
+                    <button class="tamper-btn" id="tamper-btn" type="button">
+                        🔓 Tamper Test
+                    </button>
+                </div>
+            </div>
+
+            <!-- Entropy Panel -->
+            <div class="glass-card entropy-panel">
+                <div class="section-title">Entropy Quality Analysis</div>
+
+                <div class="entropy-metrics">
+                    <div class="metric-card">
+                        <div class="metric-value" id="entropy-shannon">—</div>
+                        <div class="metric-label">Shannon (bits)</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-value" id="entropy-chi">—</div>
+                        <div class="metric-label">χ² Uniformity</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-value" id="entropy-min">—</div>
+                        <div class="metric-label">Min-Entropy</div>
+                    </div>
+                </div>
+
+                <div class="section-title" style="margin-top: 8px;">Pad Byte Distribution (mod 257)</div>
+                <div class="entropy-chart-container">
+                    <canvas id="entropy-canvas" width="600" height="80"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- ═══════ MATH SHOWCASE ═══════ -->
+        <div class="glass-card math-panel">
+            <div class="section-title">Live Transformation Mathematics</div>
+            <div class="math-formula" id="math-live">
+                <strong>OTP Modular Masking (N = 257, prime):</strong><br>
+                Encrypt: C<sub>i</sub> = (x<sub>i</sub> + K<sub>i</sub>) mod 257<br>
+                Decrypt: x<sub>i</sub> = (C<sub>i</sub> − K<sub>i</sub> + 257) mod 257<br><br>
+                <span style="color: var(--text-muted);">Awaiting live telemetry data…</span>
+            </div>
+        </div>
+
+        <!-- ═══════ PACKET LOG ═══════ -->
+        <div class="log-section">
+            <div class="section-title">Packet Log (Last 50 Frames)</div>
+            <div class="glass-card" style="padding: 0; overflow: hidden;">
+                <div class="log-table-wrapper">
+                    <table class="log-table">
+                        <thead>
+                            <tr>
+                                <th>Time (UTC)</th>
+                                <th>PKT ID</th>
+                                <th>Quantized</th>
+                                <th>Ciphertext</th>
+                                <th>Decrypted</th>
+                                <th>Integrity</th>
+                            </tr>
+                        </thead>
+                        <tbody id="log-body">
+                            <!-- Dynamically populated by app.js -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
