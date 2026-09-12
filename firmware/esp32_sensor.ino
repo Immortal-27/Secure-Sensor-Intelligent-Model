@@ -1,81 +1,86 @@
 #include "DHT.h"
+#include <ArduinoJson.h>
+#include <Wire.h>
 
 // --- Pin Definitions ---
-// Analog Pins for MQ Sensors (ADC1 Pins)
 const int mq3Pin   = 32;
 const int mq135Pin = 33;
 const int mq9Pin   = 34;
 const int mq5Pin   = 35;
 
-// Digital Pins for HC-SR04
 const int trigPin = 5;
 const int echoPin = 18;
 
-// Digital Pin for DHT22
 #define DHTPIN 4
 #define DHTTYPE DHT22
 DHT dht(DHTPIN, DHTTYPE);
 
+// --- MPU6050 Setup (Raw I2C) ---
+const int MPU = 0x68; 
+int16_t AcX, AcY, AcZ;
+
 void setup() {
-  // ESP32 er jonnyo baud rate 115200 standard
   Serial.begin(115200);
   
-  // HC-SR04 Pin Modes
   pinMode(trigPin, OUTPUT);
   pinMode(echoPin, INPUT);
   
-  // Initialize DHT Sensor
   dht.begin();
   
-  Serial.println("Initializing Sensors... Please wait.");
-  delay(2000); // MQ sensor gulo heat up howar jonnyo ektu somoy lagte pare
+  // Initialize MPU6050
+  Wire.begin(); 
+  Wire.beginTransmission(MPU);
+  Wire.write(0x6B);  // PWR_MGMT_1 register
+  Wire.write(0);     // Wake up the MPU6050
+  Wire.endTransmission(true);
 }
 
 void loop() {
-  Serial.println("=================================");
-  
-  // 1. Read MQ Sensors
-  int mq3Value   = analogRead(mq3Pin);
-  int mq135Value = analogRead(mq135Pin);
-  int mq9Value   = analogRead(mq9Pin);
-  int mq5Value   = analogRead(mq5Pin);
-  
-  Serial.print("MQ3 (Alcohol): "); Serial.println(mq3Value);
-  Serial.print("MQ135 (Air Qlt): "); Serial.println(mq135Value);
-  Serial.print("MQ9 (CO/Gas): "); Serial.println(mq9Value);
-  Serial.print("MQ5 (LPG): "); Serial.println(mq5Value);
+  // ArduinoJson v7 syntax
+  JsonDocument doc;
 
-  // 2. Read HC-SR04 (Ultrasonic)
+  // 1. Read Gas Sensors
+  doc["mq3"] = analogRead(mq3Pin);
+  doc["mq135"] = analogRead(mq135Pin);
+  doc["mq9"] = analogRead(mq9Pin);
+  doc["mq5"] = analogRead(mq5Pin);
+
+  // 2. Current Sensor Placeholder
+  doc["current"] = 0; 
+
+  // 3. Read DHT22
+  float temp = dht.readTemperature();
+  doc["temperature"] = isnan(temp) ? 0 : temp;
+
+  // 4. Read HC-SR04
+  digitalWrite(trigPin, LOW); delayMicroseconds(2);
+  digitalWrite(trigPin, HIGH); delayMicroseconds(10);
   digitalWrite(trigPin, LOW);
-  delayMicroseconds(2);
-  digitalWrite(trigPin, HIGH);
-  delayMicroseconds(10);
-  digitalWrite(trigPin, LOW);
-  
-  long duration = pulseIn(echoPin, HIGH);
-  float distance = duration * 0.034 / 2;
-  
-  Serial.print("Distance: "); 
-  Serial.print(distance); 
-  Serial.println(" cm");
+  float distance = pulseIn(echoPin, HIGH) * 0.034 / 2;
+  doc["hcsr04"] = distance;
 
-  // 3. Read DHT22 (Temperature & Humidity)
-  float humidity = dht.readHumidity();
-  float temperature = dht.readTemperature();
+  // 5. Read MPU6050 (Acceleration & Tilt)
+  Wire.beginTransmission(MPU);
+  Wire.write(0x3B);  
+  Wire.endTransmission(false);
+  Wire.requestFrom(MPU, 6, true);  
   
-  // Check if DHT read failed
-  if (isnan(humidity) || isnan(temperature)) {
-    Serial.println("Failed to read from DHT sensor!");
-  } else {
-    Serial.print("Humidity: "); 
-    Serial.print(humidity); 
-    Serial.print("%  |  Temp: "); 
-    Serial.print(temperature); 
-    Serial.println(" °C");
-  }
+  AcX = Wire.read() << 8 | Wire.read();  
+  AcY = Wire.read() << 8 | Wire.read();  
+  AcZ = Wire.read() << 8 | Wire.read();  
 
-  Serial.println("=================================\n");
+  // Convert raw values
+  float accel_mag = sqrt(pow(AcX, 2) + pow(AcY, 2) + pow(AcZ, 2)) / 16384.0;
+  float angle_x = atan2(AcY, AcZ) * 180.0 / PI;
+  float angle_y = atan2(-AcX, sqrt(pow(AcY, 2) + pow(AcZ, 2))) * 180.0 / PI;
+  float max_tilt = max(abs(angle_x), abs(angle_y));
   
-  // DHT22 slow sensor, tai 2 second delay dewa holo
-  delay(2000); 
+  doc["acceleration"] = accel_mag;
+  doc["rotation"] = max_tilt; 
+
+  // 6. Send JSON via Serial
+  serializeJson(doc, Serial);
+  Serial.println();
+  
+  delay(1000); // 1-second interval
 }
