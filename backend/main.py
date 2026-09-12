@@ -62,6 +62,7 @@ from crypto_core import (
     process_frame_tampered,
     EntropyAnalyzer,
     quantize_vector,
+    quantize_value,
 )
 from serial_bridge import SensorBridge, sensor_stream, list_available_ports
 from geo_weather import geo_weather_provider
@@ -186,8 +187,67 @@ async def telemetry_loop():
             # Timestamp generated at transmission time and bound into cryptographic HMAC signature
             frame_timestamp = datetime.now(timezone.utc).isoformat()
 
-            # Run crypto pipeline with appropriate quantization thresholds
-            active_thresholds = HARDWARE_THRESHOLDS if bridge.is_hardware else THRESHOLDS
+            # Handle ESP32 disconnected state: do NOT show mock data; emit nulls and flat graph
+            if not bridge.is_hardware or raw_values[0] is None:
+                packet_count += 1
+                channel_labels = bridge.get_channel_labels()
+                channel_units = bridge.get_channel_units()
+
+                # Quantize CH 8 & 9 (live regular API readings)
+                q_ch8 = quantize_value(raw_values[8], HARDWARE_THRESHOLDS[8])
+                q_ch9 = quantize_value(raw_values[9], HARDWARE_THRESHOLDS[9])
+                quantized = [None] * 8 + [q_ch8, q_ch9]
+
+                payload = {
+                    "timestamp": frame_timestamp,
+                    "signed_timestamp": frame_timestamp,
+                    "timestamp_bound": False,
+                    "signature_algo": "HMAC-SHA256(Quantized||Timestamp)",
+                    "packet_id": pid,
+                    "source": bridge.source,
+                    "is_hardware": False,
+                    "scenario": "NO_HARDWARE",
+                    "raw_values": raw_values,
+                    "quantized": quantized,
+                    "pad_used": [None] * NUM_CHANNELS,
+                    "ciphertext": [None] * NUM_CHANNELS,
+                    "decrypted": [None] * NUM_CHANNELS,
+                    "hmac_original": "",
+                    "hmac_recomputed": "",
+                    "integrity": "DISCONNECTED",
+                    "entropy_metrics": {
+                        "shannon": None,
+                        "chi_squared": None,
+                        "min_entropy": None,
+                        "window_size": 0,
+                    },
+                    "channel_labels": channel_labels,
+                    "channel_units": channel_units,
+                    "geo_weather": geo_weather_provider.get_data(),
+                    "hardware_status": bridge.get_hardware_info(),
+                    "uptime_seconds": round(time.time() - start_time, 1),
+                    "disclaimer": DISCLAIMER,
+                }
+                latest_frame = payload
+                frame_log.append(payload)
+                if len(frame_log) > MAX_LOG_FRAMES:
+                    frame_log = frame_log[-MAX_LOG_FRAMES:]
+
+                # Broadcast to connected WebSocket clients
+                disconnected_clients = []
+                for client in connected_clients:
+                    try:
+                        await client.send_text(json.dumps(payload))
+                    except Exception:
+                        disconnected_clients.append(client)
+                for client in disconnected_clients:
+                    connected_clients.remove(client)
+
+                await asyncio.sleep(interval)
+                continue
+
+            # Run crypto pipeline with physical hardware quantization thresholds
+            active_thresholds = HARDWARE_THRESHOLDS
             if tamper_next:
                 result = process_frame_tampered(
                     raw_values,
@@ -369,9 +429,21 @@ async def update_client_location(request: Request):
 @app.get("/api/entropy")
 async def get_entropy():
     """Entropy quality metrics and byte distribution histogram."""
+    if bridge and not bridge.is_hardware:
+        return JSONResponse({
+            "metrics": {
+                "shannon": None,
+                "chi_squared": None,
+                "min_entropy": None,
+                "window_size": 0,
+            },
+            "distribution": [0] * 256,
+            "is_hardware": False,
+        })
     return JSONResponse({
         "metrics": entropy_analyzer.get_metrics(),
         "distribution": entropy_analyzer.get_distribution(),
+        "is_hardware": True if bridge and bridge.is_hardware else False,
     })
 
 
@@ -390,10 +462,15 @@ ALLOWED_FILE_EXTENSIONS = {".txt", ".pdf"}
 
 
 @app.post("/api/file/encrypt")
-async def encrypt_file(file: UploadFile = File(...)):
+async def encrypt_file(
+    file: UploadFile = File(...),
+    mouse_entropy: Optional[str] = Form(None),
+    curve_metrics: Optional[str] = Form(None),
+):
     """
     Encrypt an arbitrary binary file (.txt, .pdf) using Information-Theoretic One-Time Pad (OTP)
     masking and compute an HMAC-SHA256 integrity digest.
+    Accepts optional human kinetic mouse trajectory curve entropy seed and metrics.
     """
     filename = file.filename or "document.bin"
     ext = Path(filename).suffix.lower()
@@ -419,8 +496,23 @@ async def encrypt_file(file: UploadFile = File(...)):
     # Compute HMAC-SHA256 over original plaintext bytes
     original_hmac = compute_file_hmac(content, HMAC_KEY)
 
-    # Generate exact length one-time pad from physical/CSPRNG entropy
-    pad_bytes = generate_file_pad(size_bytes)
+    # Parse kinetic mouse entropy if supplied
+    kinetic_seed_bytes = None
+    parsed_curve_metrics = None
+    if mouse_entropy:
+        try:
+            kinetic_seed_bytes = bytes.fromhex(mouse_entropy)
+        except Exception:
+            kinetic_seed_bytes = mouse_entropy.encode("utf-8")
+
+    if curve_metrics:
+        try:
+            parsed_curve_metrics = json.loads(curve_metrics)
+        except Exception:
+            parsed_curve_metrics = {"raw": curve_metrics}
+
+    # Generate exact length one-time pad from physical/CSPRNG entropy mixed with kinetic mouse curve
+    pad_bytes = generate_file_pad(size_bytes, kinetic_seed=kinetic_seed_bytes)
 
     # Fast bitwise XOR OTP masking: C = M ^ K
     cipher_bytes = xor_bytes(content, pad_bytes)
@@ -435,6 +527,8 @@ async def encrypt_file(file: UploadFile = File(...)):
         "preview_original_hex": content[:preview_len].hex().upper(),
         "preview_pad_hex": pad_bytes[:preview_len].hex().upper(),
         "preview_cipher_hex": cipher_bytes[:preview_len].hex().upper(),
+        "kinetic_injected": bool(kinetic_seed_bytes),
+        "curve_metrics": parsed_curve_metrics,
     })
 
 

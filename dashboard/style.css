@@ -803,6 +803,11 @@ body::before {
     box-shadow: 0 0 6px var(--danger);
 }
 
+.channel-status-dot.disconnected {
+    background: #64748b;
+    box-shadow: none;
+}
+
 .channel-data-row {
     display: flex;
     justify-content: space-between;
@@ -930,6 +935,13 @@ body::before {
     animation: failShake 0.4s ease-in-out;
 }
 
+.sig-badge.disconnected {
+    background: rgba(148, 163, 184, 0.12);
+    color: #94a3b8;
+    border: 1px solid rgba(148, 163, 184, 0.3);
+    box-shadow: none;
+}
+
 .time-tamper-btn {
     background: rgba(245, 158, 11, 0.1);
     border-color: rgba(245, 158, 11, 0.4);
@@ -1004,6 +1016,13 @@ body::before {
     color: var(--danger);
     box-shadow: var(--danger-glow);
     animation: failShake 0.5s ease-in-out;
+}
+
+.integrity-badge.disconnected {
+    background: rgba(148, 163, 184, 0.12);
+    border: 1px solid rgba(148, 163, 184, 0.3);
+    color: #94a3b8;
+    box-shadow: none;
 }
 
 @keyframes failShake {
@@ -1091,6 +1110,21 @@ body::before {
 @keyframes matchPulse {
     0%, 100% { opacity: 1; transform: scale(1); }
     50%      { opacity: 0.6; transform: scale(1.2); }
+}
+
+.hmac-match-indicator.disconnected .match-icon {
+    color: #94a3b8;
+    text-shadow: none;
+}
+
+.hmac-match-indicator.disconnected .match-text {
+    color: #94a3b8;
+}
+
+.integrity-disconnected {
+    color: #94a3b8;
+    font-family: var(--font-mono);
+    font-weight: 600;
 }
 
 /* Integrity Controls Bar */
@@ -1456,17 +1490,26 @@ body::before {
 }
 
 .vault-card {
-    background: #080c14 !important;
-    border: 1px solid rgba(6, 182, 212, 0.25) !important;
-    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.6), 0 0 15px rgba(6, 182, 212, 0.08);
-    border-radius: 6px;
+    background: rgba(15, 18, 28, 0.12) !important;
+    backdrop-filter: var(--glass-blur-heavy) !important;
+    -webkit-backdrop-filter: var(--glass-blur-heavy) !important;
+    border: 1px solid rgba(255, 255, 255, 0.1) !important;
+    border-radius: var(--radius-md) !important;
     padding: 20px;
+    box-shadow: var(--glass-shadow), var(--glass-inner-glow) !important;
+    transition: all 0.3s ease;
+}
+
+.vault-card:hover {
+    background: rgba(20, 25, 38, 0.2) !important;
+    border-color: rgba(255, 255, 255, 0.18) !important;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.1) !important;
 }
 
 .vault-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 22px;
+    gap: 20px;
 }
 
 @media (max-width: 960px) {
@@ -1479,10 +1522,20 @@ body::before {
     display: flex;
     flex-direction: column;
     gap: 14px;
-    background: rgba(12, 18, 30, 0.45);
+    background: rgba(12, 16, 24, 0.1);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
     border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
     padding: 16px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    transition: all 0.3s ease;
+}
+
+.vault-panel:hover {
+    background: rgba(18, 24, 36, 0.18);
+    border-color: rgba(255, 255, 255, 0.14);
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 
 .panel-header {
@@ -1511,20 +1564,23 @@ body::before {
 
 /* Drop Zone */
 .file-dropzone {
-    border: 2px dashed rgba(6, 182, 212, 0.35);
-    border-radius: 6px;
+    border: 2px dashed rgba(6, 182, 212, 0.3);
+    border-radius: var(--radius-sm);
     padding: 24px 16px;
     text-align: center;
-    background: rgba(6, 182, 212, 0.02);
+    background: rgba(6, 182, 212, 0.04);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: all 0.25s ease;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
 
 .file-dropzone:hover,
 .file-dropzone.dragover {
     border-color: #06b6d4;
-    background: rgba(6, 182, 212, 0.08);
-    box-shadow: 0 0 12px rgba(6, 182, 212, 0.2);
+    background: rgba(6, 182, 212, 0.1);
+    box-shadow: 0 0 20px rgba(6, 182, 212, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 
 .dropzone-icon {
@@ -1567,12 +1623,15 @@ body::before {
 
 /* File Details Badge */
 .file-badge {
-    background: rgba(15, 23, 42, 0.8);
+    background: rgba(14, 18, 28, 0.2);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
     border: 1px solid rgba(6, 182, 212, 0.2);
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
     padding: 8px 12px;
     font-family: 'JetBrains Mono', monospace;
     font-size: 0.75rem;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
 
 .badge-row {
@@ -1600,10 +1659,13 @@ body::before {
     display: flex;
     flex-direction: column;
     gap: 10px;
-    background: rgba(10, 15, 26, 0.8);
+    background: rgba(10, 16, 24, 0.2);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
     border: 1px solid rgba(16, 185, 129, 0.25);
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
     padding: 12px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(16, 185, 129, 0.08);
 }
 
 .result-header {
@@ -1643,12 +1705,15 @@ body::before {
     display: flex;
     flex-direction: column;
     gap: 5px;
-    background: rgba(5, 8, 15, 0.9);
+    background: rgba(6, 8, 14, 0.25);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
     border: 1px solid rgba(255, 255, 255, 0.06);
-    border-radius: 3px;
+    border-radius: var(--radius-sm);
     padding: 8px;
     font-family: 'JetBrains Mono', monospace;
     font-size: 0.7rem;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
 }
 
 .hex-inspector-title {
@@ -1711,25 +1776,30 @@ body::before {
 }
 
 .dual-drop-target {
-    border: 1px dashed rgba(255, 255, 255, 0.15);
-    border-radius: 4px;
+    border: 1px dashed rgba(255, 255, 255, 0.14);
+    border-radius: var(--radius-sm);
     padding: 14px 10px;
     text-align: center;
     background: rgba(255, 255, 255, 0.02);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: all 0.25s ease;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
 }
 
 .dual-drop-target:hover,
 .dual-drop-target.dragover {
     border-color: #06b6d4;
-    background: rgba(6, 182, 212, 0.06);
+    background: rgba(6, 182, 212, 0.08);
+    box-shadow: 0 0 16px rgba(6, 182, 212, 0.15);
 }
 
 .dual-drop-target.loaded {
-    border-color: #10b981;
+    border-color: rgba(16, 185, 129, 0.45);
     border-style: solid;
-    background: rgba(16, 185, 129, 0.05);
+    background: rgba(16, 185, 129, 0.08);
+    box-shadow: 0 0 16px rgba(16, 185, 129, 0.15), inset 0 1px 0 rgba(16, 185, 129, 0.1);
 }
 
 .target-title {
@@ -1773,20 +1843,24 @@ body::before {
 }
 
 .vault-text-input {
-    background: rgba(10, 14, 24, 0.9);
-    border: 1px solid rgba(255, 255, 255, 0.15);
-    border-radius: 3px;
+    background: rgba(8, 12, 20, 0.25);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: var(--radius-sm);
     color: #f1f5f9;
     font-family: 'JetBrains Mono', monospace;
     font-size: 0.75rem;
     padding: 8px 10px;
     outline: none;
-    transition: border-color 0.2s ease;
+    box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    transition: all 0.2s ease;
 }
 
 .vault-text-input:focus {
     border-color: #06b6d4;
-    box-shadow: 0 0 8px rgba(6, 182, 212, 0.25);
+    background: rgba(10, 16, 26, 0.35);
+    box-shadow: 0 0 12px rgba(6, 182, 212, 0.25), inset 0 1px 3px rgba(0, 0, 0, 0.4);
 }
 
 /* Action row */
@@ -1808,17 +1882,26 @@ body::before {
     box-shadow: 0 0 14px rgba(16, 185, 129, 0.3) !important;
 }
 
-.tamper-sim-btn {
+.copy-clipboard-btn {
     flex: 1;
-    background: rgba(244, 63, 94, 0.08) !important;
-    border-color: rgba(244, 63, 94, 0.35) !important;
-    color: #f43f5e !important;
-    font-size: 0.75rem !important;
+    background: rgba(6, 182, 212, 0.08) !important;
+    border-color: rgba(6, 182, 212, 0.35) !important;
+    color: #38bdf8 !important;
+    font-size: 0.78rem !important;
+    transition: all 0.25s ease;
 }
 
-.tamper-sim-btn:hover:not(:disabled) {
-    border-color: #f43f5e !important;
-    box-shadow: 0 0 14px rgba(244, 63, 94, 0.35) !important;
+.copy-clipboard-btn:hover:not(:disabled) {
+    border-color: #06b6d4 !important;
+    background: rgba(6, 182, 212, 0.18) !important;
+    box-shadow: 0 0 14px rgba(6, 182, 212, 0.3) !important;
+}
+
+.copy-clipboard-btn.copied {
+    border-color: #10b981 !important;
+    background: rgba(16, 185, 129, 0.2) !important;
+    color: #34d399 !important;
+    box-shadow: 0 0 16px rgba(16, 185, 129, 0.35) !important;
 }
 
 /* Verification Banner */
@@ -1862,17 +1945,20 @@ body::before {
     display: flex;
     flex-direction: column;
     border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 4px;
-    background: #050810;
+    border-radius: var(--radius-sm);
+    background: rgba(6, 10, 18, 0.25);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
     overflow: hidden;
     margin-top: 4px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
 
 .doc-viewer-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    background: rgba(15, 23, 42, 0.9);
+    background: rgba(14, 20, 32, 0.3);
     padding: 6px 10px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
@@ -1905,7 +1991,7 @@ body::before {
     font-family: 'JetBrains Mono', monospace;
     font-size: 0.78rem;
     color: #34d399;
-    background: #080c14;
+    background: rgba(5, 8, 14, 0.35);
     padding: 12px;
     margin: 0;
     max-height: 250px;
@@ -1925,3 +2011,288 @@ body::before {
 .hidden {
     display: none !important;
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   KINETIC MOUSE CURVE ENTROPY HARVESTER MODAL
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.kinetic-badge-display {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(16, 185, 129, 0.12);
+    border: 1px solid rgba(16, 185, 129, 0.35);
+    border-radius: 3px;
+    padding: 4px 8px;
+    font-family: 'Share Tech Mono', 'JetBrains Mono', monospace;
+    font-size: 0.72rem;
+    color: #10b981;
+    letter-spacing: 0.04em;
+    animation: fadeIn 0.3s ease-out;
+}
+
+.kinetic-badge-display .badge-icon {
+    font-size: 0.85rem;
+    color: #34d399;
+}
+
+.kinetic-modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(4, 7, 14, 0.88);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 10000;
+    animation: modalFadeIn 0.25s ease-out forwards;
+}
+
+@keyframes modalFadeIn {
+    from { opacity: 0; transform: scale(0.97); }
+    to   { opacity: 1; transform: scale(1); }
+}
+
+.kinetic-modal {
+    background: rgba(12, 16, 26, 0.7) !important;
+    backdrop-filter: blur(36px) !important;
+    -webkit-backdrop-filter: blur(36px) !important;
+    border: 1px solid rgba(6, 182, 212, 0.4) !important;
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.75), 0 0 30px rgba(6, 182, 212, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.1) !important;
+    border-radius: var(--radius-lg);
+    width: 680px;
+    max-width: 94vw;
+    padding: 22px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    position: relative;
+}
+
+.kinetic-modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    padding-bottom: 10px;
+}
+
+.kinetic-modal-titles {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.kinetic-modal-tag {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.68rem;
+    color: #06b6d4;
+    letter-spacing: 0.08em;
+    font-weight: 600;
+}
+
+.kinetic-modal-title {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 1.05rem;
+    color: #f8fafc;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+}
+
+.kinetic-close-btn {
+    background: transparent;
+    border: none;
+    color: #94a3b8;
+    font-size: 1.5rem;
+    cursor: pointer;
+    line-height: 1;
+    padding: 0 4px;
+    transition: color 0.15s ease;
+}
+
+.kinetic-close-btn:hover {
+    color: #f43f5e;
+}
+
+.kinetic-modal-desc {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.74rem;
+    color: #94a3b8;
+    line-height: 1.45;
+    margin: 0;
+}
+
+/* Canvas Box */
+.kinetic-canvas-box {
+    position: relative;
+    border: 2px dashed rgba(6, 182, 212, 0.35);
+    border-radius: var(--radius-sm);
+    background: rgba(5, 8, 16, 0.45);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    overflow: hidden;
+    cursor: crosshair;
+    box-shadow: inset 0 0 20px rgba(0, 0, 0, 0.6);
+}
+
+.kinetic-canvas-box:hover {
+    border-color: #06b6d4;
+    box-shadow: inset 0 0 25px rgba(6, 182, 212, 0.1), 0 0 10px rgba(6, 182, 212, 0.2);
+}
+
+#cursor-curve-canvas {
+    display: block;
+    width: 100%;
+    height: 220px;
+}
+
+.canvas-live-badge {
+    position: absolute;
+    top: 10px;
+    right: 12px;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.65rem;
+    letter-spacing: 0.06em;
+    padding: 3px 8px;
+    background: rgba(6, 182, 212, 0.15);
+    border: 1px solid rgba(6, 182, 212, 0.35);
+    border-radius: 3px;
+    color: #38bdf8;
+    pointer-events: none;
+    user-select: none;
+}
+
+.canvas-live-badge.capturing {
+    background: rgba(16, 185, 129, 0.18);
+    border-color: #10b981;
+    color: #34d399;
+    animation: pulseBadge 0.6s infinite alternate;
+}
+
+@keyframes pulseBadge {
+    from { opacity: 0.7; }
+    to   { opacity: 1; }
+}
+
+/* Metrics Grid */
+.kinetic-metrics-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+}
+
+@media (max-width: 650px) {
+    .kinetic-metrics-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+.kinetic-metric-item {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    background: rgba(15, 23, 42, 0.25);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: var(--radius-sm);
+    padding: 7px 8px;
+}
+
+.metric-lbl {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.62rem;
+    color: #64748b;
+    letter-spacing: 0.04em;
+}
+
+.metric-val {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.76rem;
+    color: #06b6d4;
+    font-weight: 600;
+}
+
+/* Progress Wrapper */
+.kinetic-progress-wrapper {
+    position: relative;
+    height: 26px;
+    background: rgba(15, 23, 42, 0.35);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.kinetic-progress-bar {
+    position: absolute;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    background: linear-gradient(90deg, rgba(6, 182, 212, 0.8), rgba(16, 185, 129, 0.9));
+    box-shadow: 0 0 12px rgba(16, 185, 129, 0.5);
+    transition: width 0.1s ease-out;
+}
+
+.kinetic-progress-bar.saturated {
+    background: #10b981;
+    box-shadow: 0 0 18px rgba(16, 185, 129, 0.7);
+}
+
+.kinetic-progress-label {
+    position: relative;
+    z-index: 1;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: #ffffff;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+    letter-spacing: 0.06em;
+}
+
+/* Modal Actions */
+.kinetic-modal-actions {
+    display: flex;
+    gap: 12px;
+    margin-top: 4px;
+}
+
+.kinetic-skip-btn {
+    flex: 1;
+    color: #94a3b8 !important;
+    border-color: rgba(255, 255, 255, 0.15) !important;
+    font-size: 0.72rem !important;
+}
+
+.kinetic-skip-btn:hover {
+    color: #f1f5f9 !important;
+    border-color: rgba(255, 255, 255, 0.35) !important;
+}
+
+.kinetic-inject-btn {
+    flex: 1.4;
+    background: rgba(16, 185, 129, 0.15) !important;
+    border-color: rgba(16, 185, 129, 0.4) !important;
+    color: #10b981 !important;
+    font-size: 0.78rem !important;
+}
+
+.kinetic-inject-btn:not(:disabled) {
+    background: #10b981 !important;
+    color: #042f1d !important;
+    box-shadow: 0 0 16px rgba(16, 185, 129, 0.4) !important;
+    cursor: pointer;
+}
+
+.kinetic-inject-btn:not(:disabled):hover {
+    box-shadow: 0 0 22px rgba(16, 185, 129, 0.7) !important;
+}
+

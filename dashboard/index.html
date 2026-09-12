@@ -150,7 +150,7 @@
                             <input type="file" id="vault-file-input" accept=".txt,.pdf" style="display: none;" />
                             <div class="dropzone-icon">⇪</div>
                             <div class="dropzone-prompt">Drag &amp; drop <strong>.TXT</strong> or <strong>.PDF</strong> file here</div>
-                            <div class="dropzone-sub">or <button type="button" class="btn-browse" id="btn-browse-file">Browse Computer</button> (Max 10 MB)</div>
+                            <div class="dropzone-sub">or <button type="button" class="btn-browse" id="btn-browse-file">Browse Computer</button> &bull; <button type="button" class="btn-browse" id="btn-load-sample" style="color: #38bdf8; border-color: rgba(56, 189, 248, 0.4);">Load Sample Report</button></div>
                         </div>
 
                         <!-- File Details Badge -->
@@ -179,6 +179,10 @@
                                 <span class="result-tag">[ PRE-ENCRYPTION DIGEST ]</span>
                             </div>
                             <div class="hmac-pill-display" id="enc-hmac-display">—</div>
+                            <div class="kinetic-badge-display hidden" id="kinetic-badge-display">
+                                <span class="badge-icon">⚡</span>
+                                <span class="badge-text" id="kinetic-badge-text">[ KINETIC CURVE ENTROPY INJECTED ]</span>
+                            </div>
 
                             <!-- Side-by-side Hex Inspector -->
                             <div class="hex-inspector-container">
@@ -204,6 +208,9 @@
                                 </button>
                                 <button type="button" class="hud-btn download-btn" id="btn-download-pad">
                                     <span class="hud-bracket">[</span> DOWNLOAD .PAD <span class="hud-bracket">]</span>
+                                </button>
+                                <button type="button" class="hud-btn copy-clipboard-btn" id="btn-copy-clipboard">
+                                    <span class="hud-bracket">[</span> COPY TO CLIPBOARD <span class="hud-bracket">]</span>
                                 </button>
                             </div>
                         </div>
@@ -246,9 +253,6 @@
                         <div class="vault-actions-row">
                             <button type="button" class="hud-btn decrypt-btn" id="btn-decrypt-verify">
                                 <span class="hud-bracket">[</span> DECRYPT &amp; VERIFY INTEGRITY <span class="hud-bracket">]</span>
-                            </button>
-                            <button type="button" class="hud-btn tamper-sim-btn" id="btn-tamper-sim">
-                                <span class="hud-bracket">[</span> SIMULATE SINGLE-BIT TAMPERING <span class="hud-bracket">]</span>
                             </button>
                         </div>
 
@@ -387,6 +391,66 @@
             </div>
         </div>
 
+    </div>
+
+    <!-- ═══════ PHYSICAL KINETIC ENTROPY MODAL (MOUSE CURVE SAMPLER) ═══════ -->
+    <div class="kinetic-modal-overlay hidden" id="kinetic-modal-overlay">
+        <div class="glass-card kinetic-modal" id="kinetic-modal">
+            <div class="kinetic-modal-header">
+                <div class="kinetic-modal-titles">
+                    <span class="kinetic-modal-tag">[ PHYSICAL KINETIC ENTROPY HARVESTER ]</span>
+                    <span class="kinetic-modal-title">Mouse Cursor Trajectory &amp; Curvature Sampler</span>
+                </div>
+                <button type="button" class="kinetic-close-btn" id="btn-close-kinetic-modal" title="Cancel">&times;</button>
+            </div>
+
+            <p class="kinetic-modal-desc">
+                Move your cursor randomly across the matrix below to generate human physical entropy. The system measures your trajectory arc length (&Sigma;&radic;(&Delta;x&sup2;+&Delta;y&sup2;)), angular curvature (&Sigma;|&Delta;&theta;|), and velocity jitter to calculate a kinetic seed parameter.
+            </p>
+
+            <!-- Kinetic Capture Canvas -->
+            <div class="kinetic-canvas-box" id="kinetic-canvas-box">
+                <canvas id="cursor-curve-canvas" width="620" height="220"></canvas>
+                <div class="kinetic-crosshair"></div>
+                <div class="canvas-live-badge" id="canvas-live-badge">READY &bull; MOVE CURSOR INSIDE BOX</div>
+            </div>
+
+            <!-- Live Curve Metrics -->
+            <div class="kinetic-metrics-grid">
+                <div class="kinetic-metric-item">
+                    <span class="metric-lbl">TRAJECTORY SAMPLES:</span>
+                    <span class="metric-val" id="stat-curve-points">0 / 120</span>
+                </div>
+                <div class="kinetic-metric-item">
+                    <span class="metric-lbl">CURVE ARC LENGTH:</span>
+                    <span class="metric-val" id="stat-curve-length">0.0 px</span>
+                </div>
+                <div class="kinetic-metric-item">
+                    <span class="metric-lbl">CURVATURE SUM (&Sigma;|&Delta;&theta;|):</span>
+                    <span class="metric-val" id="stat-curve-angle">0.00 rad</span>
+                </div>
+                <div class="kinetic-metric-item">
+                    <span class="metric-lbl">KINETIC SEED ENTROPY:</span>
+                    <span class="metric-val" id="stat-curve-entropy">0.00 bits</span>
+                </div>
+            </div>
+
+            <!-- Entropy Saturation Progress Bar -->
+            <div class="kinetic-progress-wrapper">
+                <div class="kinetic-progress-bar" id="kinetic-progress-bar" style="width: 0%;"></div>
+                <span class="kinetic-progress-label" id="kinetic-progress-label">HARVESTING KINETIC ENTROPY: 0%</span>
+            </div>
+
+            <!-- Modal Action Buttons -->
+            <div class="kinetic-modal-actions">
+                <button type="button" class="hud-btn kinetic-skip-btn" id="btn-skip-kinetic">
+                    <span class="hud-bracket">[</span> BYPASS &amp; USE HARDWARE TRNG ONLY <span class="hud-bracket">]</span>
+                </button>
+                <button type="button" class="hud-btn kinetic-inject-btn" id="btn-inject-kinetic" disabled>
+                    <span class="hud-bracket">[</span> INJECT CURVE ENTROPY &amp; ENCRYPT <span class="hud-bracket">]</span>
+                </button>
+            </div>
+        </div>
     </div>
 
     <script src="/static/webthreads.js"></script>

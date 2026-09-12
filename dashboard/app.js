@@ -328,7 +328,7 @@
         if (dom.espLinkStatus) {
             dom.espLinkStatus.textContent = isHardwareActive
                 ? `HARDWARE LINKED (${info.port || "USB"})`
-                : "SIMULATOR ACTIVE";
+                : "DISCONNECTED (NO ESP32)";
         }
 
         if (dom.espStatusLight) {
@@ -559,9 +559,7 @@
         updateIntegrityPanel(data);
 
         /* Entropy panel (throttled) */
-        if (data.entropy_metrics) {
-            updateEntropyPanel(data.entropy_metrics);
-        }
+        updateEntropyPanel(data.entropy_metrics, data.is_hardware);
 
         /* Transformation example */
         updateMathShowcase(data);
@@ -671,39 +669,56 @@
                 }
             }
             sparklineData[i].prevVal = raw;
-        } else {
-            rawEl.textContent = "—";
-            rawEl.style.color = "";
-        }
-
-        /* Quantized */
-        quantEl.textContent = (quant !== null) ? String(quant) : "—";
-
-        /* Cipher */
-        if (cipher !== null) {
-            const hex = cipher.toString(16).toUpperCase().padStart(2, "0");
-            cipherEl.textContent = `0x${hex} (${cipher})`;
-        } else {
-            cipherEl.textContent = "—";
-        }
-
-        /* Status dot */
-        if (dotEl) {
-            if (sensorFail) {
-                dotEl.className = "channel-status-dot fail";
-            } else {
-                const isOk = data.integrity === "VERIFIED";
-                dotEl.className = "channel-status-dot" + (isOk ? "" : " fail");
-            }
-        }
-
-        /* Sparkline buffer & redraw */
-        if (raw !== null && !sensorFail) {
+            /* Sparkline buffer & redraw */
+            sparklineData[i].isFlat = false;
             sparklineData[i].raw.push(raw);
             if (sparklineData[i].raw.length > MAX_SPARKLINE_POINTS) {
                 sparklineData[i].raw.shift();
             }
             drawSparkline(i);
+        } else {
+            /* Disconnected / Null Reading */
+            rawEl.textContent = "null";
+            rawEl.style.color = "var(--text-muted, #94a3b8)";
+
+            if (trendEl) {
+                trendEl.textContent = "▪ 0.00";
+                trendEl.className = "channel-trend neutral";
+            }
+            sparklineData[i].prevVal = null;
+
+            /* Flatten sparkline graph when disconnected / null */
+            if (!sparklineData[i].isFlat || sparklineData[i].raw.length === 0) {
+                sparklineData[i].raw = Array(MAX_SPARKLINE_POINTS).fill(0);
+                sparklineData[i].isFlat = true;
+            }
+            drawSparkline(i);
+        }
+
+        /* Quantized */
+        quantEl.textContent = (quant !== null) ? String(quant) : "null";
+        quantEl.style.color = (quant === null) ? "var(--text-muted, #94a3b8)" : "";
+
+        /* Cipher */
+        if (cipher !== null) {
+            const hex = cipher.toString(16).toUpperCase().padStart(2, "0");
+            cipherEl.textContent = `0x${hex} (${cipher})`;
+            cipherEl.style.color = "";
+        } else {
+            cipherEl.textContent = "null";
+            cipherEl.style.color = "var(--text-muted, #94a3b8)";
+        }
+
+        /* Status dot */
+        if (dotEl) {
+            if (raw === null || !data.is_hardware) {
+                dotEl.className = "channel-status-dot disconnected";
+            } else if (sensorFail) {
+                dotEl.className = "channel-status-dot fail";
+            } else {
+                const isOk = data.integrity === "VERIFIED";
+                dotEl.className = "channel-status-dot" + (isOk ? "" : " fail");
+            }
         }
     }
 
@@ -738,10 +753,15 @@
         if (dom.hmacRecomputed) dom.hmacRecomputed.textContent = formatHex(data.hmac_recomputed);
 
         const verified = data.integrity === "VERIFIED";
+        const isDisconnected = !data.is_hardware || data.integrity === "DISCONNECTED";
 
         /* Signature / Timestamp binding badge */
         if (dom.timeVerifiedBadge) {
-            if (verified) {
+            if (isDisconnected) {
+                dom.timeVerifiedBadge.textContent = "[ NO ESP32 LINK ]";
+                dom.timeVerifiedBadge.className = "sig-badge disconnected";
+                if (dom.signedTimestamp) dom.signedTimestamp.classList.remove("mismatch");
+            } else if (verified) {
                 dom.timeVerifiedBadge.textContent = "[ BOUND IN HMAC ✓ ]";
                 dom.timeVerifiedBadge.className = "sig-badge verified";
                 if (dom.signedTimestamp) dom.signedTimestamp.classList.remove("mismatch");
@@ -759,12 +779,18 @@
         }
 
         /* Increment check counter */
-        integrityCheckCount++;
-        if (dom.integrityCheckCount) dom.integrityCheckCount.textContent = integrityCheckCount;
+        if (!isDisconnected) {
+            integrityCheckCount++;
+            if (dom.integrityCheckCount) dom.integrityCheckCount.textContent = integrityCheckCount;
+        }
 
         /* HMAC Match Indicator */
         if (dom.hmacMatchIndicator) {
-            if (verified) {
+            if (isDisconnected) {
+                dom.hmacMatchIndicator.className = "hmac-match-indicator disconnected";
+                if (dom.matchIcon) dom.matchIcon.textContent = "▪";
+                if (dom.matchText) dom.matchText.textContent = "ESP32 DISCONNECTED — TELEMETRY PAUSED";
+            } else if (verified) {
                 dom.hmacMatchIndicator.className = "hmac-match-indicator matched";
                 if (dom.matchIcon) dom.matchIcon.textContent = "═";
                 if (dom.matchText) dom.matchText.textContent = "HASHES MATCH — INTEGRITY VERIFIED";
@@ -781,27 +807,32 @@
 
         /* HMAC value highlighting on mismatch */
         if (dom.hmacOriginal) {
-            dom.hmacOriginal.classList.toggle("mismatch", !verified);
+            dom.hmacOriginal.classList.toggle("mismatch", !verified && !isDisconnected);
         }
         if (dom.hmacRecomputed) {
-            dom.hmacRecomputed.classList.toggle("mismatch", !verified);
+            dom.hmacRecomputed.classList.toggle("mismatch", !verified && !isDisconnected);
         }
 
         /* Integrity Badge */
         if (dom.integrityBadge) {
-            dom.integrityBadge.textContent = verified ? "[ ✓ VERIFIED ]" : "[ ✗ INTEGRITY VIOLATION ]";
-            dom.integrityBadge.className = "integrity-badge " + (verified ? "verified" : "failed");
+            if (isDisconnected) {
+                dom.integrityBadge.textContent = "[ DISCONNECTED ]";
+                dom.integrityBadge.className = "integrity-badge disconnected";
+            } else {
+                dom.integrityBadge.textContent = verified ? "[ ✓ VERIFIED ]" : "[ ✗ INTEGRITY VIOLATION ]";
+                dom.integrityBadge.className = "integrity-badge " + (verified ? "verified" : "failed");
 
-            if (!verified) {
-                dom.integrityBadge.style.animation = "none";
-                void dom.integrityBadge.offsetWidth;
-                dom.integrityBadge.style.animation = "";
+                if (!verified) {
+                    dom.integrityBadge.style.animation = "none";
+                    void dom.integrityBadge.offsetWidth;
+                    dom.integrityBadge.style.animation = "";
+                }
             }
         }
 
         /* Panel border flash on violation */
         if (dom.integrityPanel) {
-            if (!verified) {
+            if (!verified && !isDisconnected) {
                 dom.integrityPanel.classList.add("violation");
                 setTimeout(function () {
                     dom.integrityPanel.classList.remove("violation");
@@ -812,7 +843,7 @@
         }
 
         /* Track failures and log tamper events */
-        if (!verified && lastIntegrityState === "VERIFIED") {
+        if (!isDisconnected && !verified && lastIntegrityState === "VERIFIED") {
             integrityFailCount++;
             if (dom.integrityFailCount) dom.integrityFailCount.textContent = integrityFailCount;
             addTamperLogEntry(data);
@@ -882,18 +913,40 @@
     }
 
     /* ── Entropy Panel (Throttled) ────────────────────────────────────── */
-    function updateEntropyPanel(metrics) {
+    function updateEntropyPanel(metrics, isHardware) {
+        const isConnected = (isHardware !== undefined ? isHardware : isHardwareActive) && metrics && metrics.shannon !== null && metrics.shannon !== undefined;
+
+        if (!isConnected) {
+            if (dom.entropyShannon) {
+                dom.entropyShannon.textContent = "null";
+                dom.entropyShannon.style.color = "var(--text-muted, #94a3b8)";
+            }
+            if (dom.entropyChi) {
+                dom.entropyChi.textContent = "null";
+                dom.entropyChi.style.color = "var(--text-muted, #94a3b8)";
+            }
+            if (dom.entropyMin) {
+                dom.entropyMin.textContent = "null";
+                dom.entropyMin.style.color = "var(--text-muted, #94a3b8)";
+            }
+            drawEntropyHistogram([], true);
+            return;
+        }
+
         if (dom.entropyShannon) {
             dom.entropyShannon.textContent = (metrics.shannon !== undefined && isFinite(metrics.shannon))
-                ? metrics.shannon.toFixed(2) : "—";
+                ? metrics.shannon.toFixed(2) : "null";
+            dom.entropyShannon.style.color = "";
         }
         if (dom.entropyChi) {
             dom.entropyChi.textContent = (metrics.chi_squared !== undefined && isFinite(metrics.chi_squared))
-                ? metrics.chi_squared.toFixed(4) : "—";
+                ? metrics.chi_squared.toFixed(4) : "null";
+            dom.entropyChi.style.color = "";
         }
         if (dom.entropyMin) {
             dom.entropyMin.textContent = (metrics.min_entropy !== undefined && isFinite(metrics.min_entropy))
-                ? metrics.min_entropy.toFixed(2) : "—";
+                ? metrics.min_entropy.toFixed(2) : "null";
+            dom.entropyMin.style.color = "";
         }
 
         const now = Date.now();
@@ -904,14 +957,17 @@
     }
 
     function fetchEntropyDistribution() {
+        if (!isHardwareActive) {
+            drawEntropyHistogram([], true);
+            return;
+        }
         if (entropyFetchPending) return;
         entropyFetchPending = true;
         fetch(API_BASE + "/entropy")
             .then(function (r) { return r.json(); })
             .then(function (data) {
-                if (data.distribution) {
-                    drawEntropyHistogram(data.distribution);
-                }
+                const disconnected = !data.is_hardware || !isHardwareActive || !data.distribution || data.distribution.length === 0;
+                drawEntropyHistogram(data.distribution, disconnected);
             })
             .catch(function () { })
             .finally(function () { entropyFetchPending = false; });
@@ -1026,7 +1082,7 @@
     }
 
     /* ── Entropy Histogram ────────────────────────────────────────────── */
-    function drawEntropyHistogram(distribution) {
+    function drawEntropyHistogram(distribution, isDisconnected) {
         const canvas = dom.entropyCanvas;
         if (!canvas) return;
 
@@ -1044,6 +1100,36 @@
             ctx.moveTo(0, y);
             ctx.lineTo(w, y);
             ctx.stroke();
+        }
+
+        /* If disconnected or no distribution, draw clean flat graph line */
+        const isFlat = isDisconnected || !isHardwareActive || !distribution || distribution.length === 0 || distribution.every(v => v === 0);
+        if (isFlat) {
+            /* Clean flat center line representing zeroed spectrum */
+            ctx.strokeStyle = "rgba(245, 158, 11, 0.55)";
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.moveTo(0, h / 2);
+            ctx.lineTo(w, h / 2);
+            ctx.stroke();
+
+            /* End dot matching channel sparklines */
+            ctx.beginPath();
+            ctx.arc(w - 4, h / 2, 2.5, 0, Math.PI * 2);
+            ctx.fillStyle = "#ffffff";
+            ctx.shadowColor = "#f59e0b";
+            ctx.shadowBlur = 6;
+            ctx.fill();
+            ctx.shadowBlur = 0;
+
+            /* Flat baseline */
+            ctx.strokeStyle = "rgba(255, 255, 255, 0.08)";
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(0, h - 2);
+            ctx.lineTo(w, h - 2);
+            ctx.stroke();
+            return;
         }
 
         const numBins = distribution.length;
@@ -1107,16 +1193,20 @@
 
         let summary = "Telemetry Frame";
         if (vals.length >= 4) {
-            if (data.is_hardware) {
+            if (data.is_hardware && vals[0] !== null) {
                 // Hardware specific reading summary (Temp, Hum, Distance, MQ3)
                 summary = `${Number(vals[0]).toFixed(1)}°C · ${Number(vals[1]).toFixed(0)}% · ${Number(vals[2]).toFixed(1)}cm · MQ3:${Number(vals[3]).toFixed(0)}`;
+            } else if (!data.is_hardware || vals[0] === null) {
+                summary = "ESP32 Disconnected (Sensors Null)";
             } else {
                 summary = `${Number(vals[0]).toFixed(1)}°C · ${Number(vals[1]).toFixed(0)}% · ${Number(vals[2]).toFixed(0)}hPa · ${Number(vals[6]).toFixed(1)}V`;
             }
         }
 
         const integrity = data.integrity || "—";
-        const integrityClass = integrity === "VERIFIED" ? "integrity-verified" : "integrity-failed";
+        const integrityClass = integrity === "VERIFIED"
+            ? "integrity-verified"
+            : (integrity === "DISCONNECTED" ? "integrity-disconnected" : "integrity-failed");
 
         row.innerHTML =
             `<td>${ts}</td>` +
@@ -1299,7 +1389,7 @@
 
         const inputHmac = $('input-expected-hmac');
         const btnDecrypt = $('btn-decrypt-verify');
-        const btnTamperSim = $('btn-tamper-sim');
+        const btnCopyClipboard = $('btn-copy-clipboard') || $('btn-tamper-sim');
         const verifyBanner = $('vault-verify-banner');
 
         const docViewer = $('doc-viewer-container');
@@ -1348,8 +1438,19 @@
             });
         }
 
+        const btnLoadSample = $('btn-load-sample');
+        if (btnLoadSample) {
+            btnLoadSample.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const sampleContent = `SSIM QUANTUM-RESILIENT TELEMETRY LOG REPORT\n============================================\nTIMESTAMP: ${new Date().toISOString()}\nMISSION: SECURE SENSOR INTELLIGENT MODEL\nTRNG SOURCE: PHYSICAL ESP32 HARDWARE ENTROPY + HUMAN KINETIC CURVE HARVESTER\nCH0 TEMPERATURE: 27.42 C [VERIFIED]\nCH1 DISTANCE: 142.8 cm [VERIFIED]\nCH2 MQ3 GAS: 412 ADC [VERIFIED]\nCH6 ACCELERATION: 1.02 g [PHYSICAL MOTION DETECTED]\nCH8 GEO LAT/LON: 22.5726 N, 88.3639 E [KOLKATA]\nCH9 SURFACE ATMOS: 1009.6 hPa [ONLINE]\nINTEGRITY STATUS: 100% BIT-FOR-BIT SECURE INFORMATION-THEORETIC OTP ENCRYPTION\n============================================\n`;
+                const sampleFile = new File([sampleContent], "ssim_telemetry_report.txt", { type: "text/plain" });
+                handleSourceFile(sampleFile);
+            });
+        }
+
         dropzone.addEventListener('click', (e) => {
-            if (e.target !== btnBrowse) {
+            if (e.target !== btnBrowse && e.target !== btnLoadSample) {
                 fileInput.value = '';
                 fileInput.click();
             }
@@ -1389,8 +1490,384 @@
             btnEncrypt.classList.remove('disabled');
         }
 
+        // Kinetic Modal Elements & Harvesting State
+        const kineticOverlay = $('kinetic-modal-overlay');
+        const btnCloseKinetic = $('btn-close-kinetic-modal');
+        const kineticCanvas = $('cursor-curve-canvas');
+        const canvasLiveBadge = $('canvas-live-badge');
+        const statPoints = $('stat-curve-points');
+        const statLength = $('stat-curve-length');
+        const statAngle = $('stat-curve-angle');
+        const statEntropy = $('stat-curve-entropy');
+        const kineticProgressBar = $('kinetic-progress-bar');
+        const kineticProgressLabel = $('kinetic-progress-label');
+        const btnSkipKinetic = $('btn-skip-kinetic');
+        const btnInjectKinetic = $('btn-inject-kinetic');
+        const kineticBadgeDisplay = $('kinetic-badge-display');
+        const kineticBadgeText = $('kinetic-badge-text');
+
+        let kineticState = {
+            active: false,
+            points: [],
+            totalArcLength: 0,
+            totalCurvature: 0,
+            lastX: null,
+            lastY: null,
+            lastTime: null,
+            lastHeading: null,
+            displacementBins: {},
+            totalDisplacements: 0,
+            entropyBits: 0,
+            saturation: 0,
+            hashWords: [0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19],
+            particles: [],
+            animId: null,
+        };
+
+        function mixEntropyWord(x, y, t, ds, heading) {
+            const h = kineticState.hashWords;
+            const w1 = ((Math.round(x * 100) & 0xFFFF) | ((Math.round(y * 100) & 0xFFFF) << 16)) >>> 0;
+            const w2 = ((Math.round(t * 1000) & 0xFFFF) | ((Math.round(ds * 100) & 0xFFFF) << 16)) >>> 0;
+            const w3 = (Math.round((heading + 4) * 1000000)) >>> 0;
+
+            h[0] = Math.imul(h[0] ^ w1, 0x85ebca6b) >>> 0;
+            h[1] = Math.imul(h[1] ^ w2, 0xc2b2ae35) >>> 0;
+            h[2] = (h[2] + h[0] + w3) >>> 0;
+            h[3] = Math.imul(h[3] ^ h[1], 0x27d4eb2f) >>> 0;
+            h[4] = Math.imul(h[4] ^ h[2], 0x165667b1) >>> 0;
+            h[5] = (h[5] + h[3] + w1) >>> 0;
+            h[6] = Math.imul(h[6] ^ h[4], 0xb55a4f09) >>> 0;
+            h[7] = (h[7] ^ h[5] ^ h[6]) >>> 0;
+        }
+
+        function getKineticSeedHex() {
+            return kineticState.hashWords.map(w => w.toString(16).padStart(8, '0')).join('');
+        }
+
+        function updateKineticUI() {
+            if (statPoints) statPoints.textContent = `${kineticState.points.length} / 100`;
+            if (statLength) statLength.textContent = `${kineticState.totalArcLength.toFixed(1)} px`;
+            if (statAngle) statAngle.textContent = `${kineticState.totalCurvature.toFixed(2)} rad`;
+            if (statEntropy) statEntropy.textContent = `${kineticState.entropyBits.toFixed(2)} bits`;
+
+            const sat = kineticState.saturation;
+            if (kineticProgressBar) {
+                kineticProgressBar.style.width = `${sat}%`;
+                if (sat >= 100) {
+                    kineticProgressBar.classList.add('saturated');
+                } else {
+                    kineticProgressBar.classList.remove('saturated');
+                }
+            }
+
+            if (kineticProgressLabel) {
+                if (sat >= 100) {
+                    kineticProgressLabel.textContent = "100% SATURATED — READY TO INJECT";
+                } else {
+                    kineticProgressLabel.textContent = `HARVESTING KINETIC ENTROPY: ${sat}%`;
+                }
+            }
+
+            if (btnInjectKinetic) {
+                btnInjectKinetic.disabled = (sat < 25);
+            }
+
+            if (canvasLiveBadge) {
+                if (sat >= 100) {
+                    canvasLiveBadge.textContent = "✓ 100% SATURATED • PHYSICAL CURVE COMPUTED";
+                    canvasLiveBadge.classList.add("capturing");
+                }
+            }
+        }
+
+        function handleCursorMove(e) {
+            if (!kineticState.active || !kineticCanvas) return;
+            const rect = kineticCanvas.getBoundingClientRect();
+            const scaleX = kineticCanvas.width / rect.width;
+            const scaleY = kineticCanvas.height / rect.height;
+            const x = (e.clientX - rect.left) * scaleX;
+            const y = (e.clientY - rect.top) * scaleY;
+            const t = performance.now();
+
+            if (kineticState.lastX === null) {
+                kineticState.lastX = x;
+                kineticState.lastY = y;
+                kineticState.lastTime = t;
+                kineticState.points.push({ x, y, t, ds: 0 });
+                if (canvasLiveBadge) {
+                    canvasLiveBadge.textContent = "SAMPLING CURVE DYNAMICS...";
+                    canvasLiveBadge.classList.add("capturing");
+                }
+                return;
+            }
+
+            const dx = x - kineticState.lastX;
+            const dy = y - kineticState.lastY;
+            const ds = Math.sqrt(dx * dx + dy * dy);
+
+            // Filter out resting cursor micro-jitter
+            if (ds < 1.8) return;
+
+            kineticState.totalArcLength += ds;
+
+            // Angular heading and curvature variation
+            const heading = Math.atan2(dy, dx);
+            if (kineticState.lastHeading !== null) {
+                let dtheta = heading - kineticState.lastHeading;
+                while (dtheta > Math.PI) dtheta -= 2 * Math.PI;
+                while (dtheta < -Math.PI) dtheta += 2 * Math.PI;
+                kineticState.totalCurvature += Math.abs(dtheta);
+            }
+            kineticState.lastHeading = heading;
+
+            // Discretize displacement for Shannon entropy calculation
+            const binX = Math.max(-10, Math.min(10, Math.round(dx / 3)));
+            const binY = Math.max(-10, Math.min(10, Math.round(dy / 3)));
+            const binKey = `${binX}:${binY}`;
+            kineticState.displacementBins[binKey] = (kineticState.displacementBins[binKey] || 0) + 1;
+            kineticState.totalDisplacements++;
+
+            let H = 0;
+            const N = kineticState.totalDisplacements;
+            for (const k in kineticState.displacementBins) {
+                const p = kineticState.displacementBins[k] / N;
+                if (p > 0) H -= p * Math.log2(p);
+            }
+            kineticState.entropyBits = H;
+
+            // Mix into cryptographic rolling seed
+            mixEntropyWord(x, y, t, ds, heading);
+
+            // Store point
+            kineticState.points.push({ x, y, t, ds });
+            kineticState.lastX = x;
+            kineticState.lastY = y;
+            kineticState.lastTime = t;
+
+            // Emit visual glowing particles
+            for (let i = 0; i < 2; i++) {
+                kineticState.particles.push({
+                    x: x,
+                    y: y,
+                    vx: (Math.random() - 0.5) * 3,
+                    vy: (Math.random() - 0.5) * 3,
+                    alpha: 1.0,
+                    size: Math.random() * 2.2 + 1.2,
+                    color: Math.random() > 0.4 ? '#06b6d4' : '#10b981'
+                });
+            }
+
+            // Saturation targets: 100 points, 800px arc length, 6.0 rad total curvature
+            const pRatio = Math.min(1, kineticState.points.length / 100);
+            const lRatio = Math.min(1, kineticState.totalArcLength / 800);
+            const cRatio = Math.min(1, kineticState.totalCurvature / 6.0);
+            kineticState.saturation = Math.min(100, Math.round((pRatio * 0.35 + lRatio * 0.35 + cRatio * 0.30) * 100));
+
+            updateKineticUI();
+        }
+
+        function renderKineticCanvas() {
+            if (!kineticState.active || !kineticCanvas) return;
+            const ctx = kineticCanvas.getContext('2d');
+            const w = kineticCanvas.width;
+            const h = kineticCanvas.height;
+
+            // Phosphorescent phosphor fading trail
+            ctx.fillStyle = "rgba(5, 8, 16, 0.22)";
+            ctx.fillRect(0, 0, w, h);
+
+            // Subtle radar grid
+            ctx.strokeStyle = "rgba(6, 182, 212, 0.06)";
+            ctx.lineWidth = 1;
+            for (let x = 30; x < w; x += 30) {
+                ctx.beginPath();
+                ctx.moveTo(x, 0);
+                ctx.lineTo(x, h);
+                ctx.stroke();
+            }
+            for (let y = 30; y < h; y += 30) {
+                ctx.beginPath();
+                ctx.moveTo(0, y);
+                ctx.lineTo(w, y);
+                ctx.stroke();
+            }
+
+            // Draw trajectory path
+            const pts = kineticState.points;
+            if (pts.length >= 2) {
+                ctx.save();
+                ctx.lineWidth = 2.5;
+                ctx.lineCap = 'round';
+                ctx.lineJoin = 'round';
+                ctx.shadowColor = '#06b6d4';
+                ctx.shadowBlur = 10;
+
+                const startIdx = Math.max(0, pts.length - 80);
+                for (let i = startIdx + 1; i < pts.length; i++) {
+                    const progress = (i - startIdx) / (pts.length - startIdx);
+                    ctx.strokeStyle = `rgba(${Math.round(6 + progress * 10)}, ${Math.round(182 + progress * 3)}, ${Math.round(212 - progress * 83)}, ${0.2 + progress * 0.8})`;
+                    ctx.beginPath();
+                    ctx.moveTo(pts[i - 1].x, pts[i - 1].y);
+                    ctx.lineTo(pts[i].x, pts[i].y);
+                    ctx.stroke();
+                }
+                ctx.restore();
+            }
+
+            // Glowing cursor ring
+            if (kineticState.lastX !== null && kineticState.lastY !== null) {
+                ctx.save();
+                ctx.beginPath();
+                ctx.arc(kineticState.lastX, kineticState.lastY, 6, 0, Math.PI * 2);
+                ctx.strokeStyle = "#38bdf8";
+                ctx.lineWidth = 2;
+                ctx.shadowColor = "#38bdf8";
+                ctx.shadowBlur = 10;
+                ctx.stroke();
+
+                ctx.beginPath();
+                ctx.arc(kineticState.lastX, kineticState.lastY, 2, 0, Math.PI * 2);
+                ctx.fillStyle = "#ffffff";
+                ctx.fill();
+                ctx.restore();
+            }
+
+            // Particles
+            for (let i = kineticState.particles.length - 1; i >= 0; i--) {
+                const p = kineticState.particles[i];
+                p.x += p.vx;
+                p.y += p.vy;
+                p.alpha -= 0.035;
+                if (p.alpha <= 0) {
+                    kineticState.particles.splice(i, 1);
+                    continue;
+                }
+                ctx.save();
+                ctx.globalAlpha = Math.max(0, p.alpha);
+                ctx.fillStyle = p.color;
+                ctx.shadowColor = p.color;
+                ctx.shadowBlur = 6;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            }
+
+            kineticState.animId = requestAnimationFrame(renderKineticCanvas);
+        }
+
+        function openKineticModal() {
+            if (!kineticOverlay || !kineticCanvas) return;
+            kineticState.points = [];
+            kineticState.totalArcLength = 0;
+            kineticState.totalCurvature = 0;
+            kineticState.lastX = null;
+            kineticState.lastY = null;
+            kineticState.lastTime = null;
+            kineticState.lastHeading = null;
+            kineticState.displacementBins = {};
+            kineticState.totalDisplacements = 0;
+            kineticState.entropyBits = 0;
+            kineticState.saturation = 0;
+            kineticState.hashWords = [0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19];
+            kineticState.particles = [];
+            kineticState.active = true;
+
+            if (btnInjectKinetic) btnInjectKinetic.disabled = true;
+            if (canvasLiveBadge) {
+                canvasLiveBadge.textContent = "READY • MOVE CURSOR INSIDE BOX";
+                canvasLiveBadge.classList.remove("capturing");
+            }
+
+            updateKineticUI();
+
+            const ctx = kineticCanvas.getContext('2d');
+            ctx.fillStyle = "#050810";
+            ctx.fillRect(0, 0, kineticCanvas.width, kineticCanvas.height);
+
+            kineticOverlay.classList.remove('hidden');
+
+            if (kineticState.animId) cancelAnimationFrame(kineticState.animId);
+            kineticState.animId = requestAnimationFrame(renderKineticCanvas);
+        }
+
+        function closeKineticModal() {
+            if (!kineticOverlay) return;
+            kineticState.active = false;
+            if (kineticState.animId) {
+                cancelAnimationFrame(kineticState.animId);
+                kineticState.animId = null;
+            }
+            kineticOverlay.classList.add('hidden');
+        }
+
+        if (btnCloseKinetic) {
+            btnCloseKinetic.addEventListener('click', (e) => {
+                e.preventDefault();
+                closeKineticModal();
+                btnEncrypt.disabled = false;
+            });
+        }
+
+        if (kineticOverlay) {
+            kineticOverlay.addEventListener('click', (e) => {
+                if (e.target === kineticOverlay) {
+                    closeKineticModal();
+                    btnEncrypt.disabled = false;
+                }
+            });
+        }
+
+        if (btnSkipKinetic) {
+            btnSkipKinetic.addEventListener('click', (e) => {
+                e.preventDefault();
+                closeKineticModal();
+                executeEncryption(null, null);
+            });
+        }
+
+        if (btnInjectKinetic) {
+            btnInjectKinetic.addEventListener('click', (e) => {
+                e.preventDefault();
+                const seedHex = getKineticSeedHex();
+                const metrics = {
+                    points: kineticState.points.length,
+                    arc_length: parseFloat(kineticState.totalArcLength.toFixed(1)),
+                    curvature_rad: parseFloat(kineticState.totalCurvature.toFixed(2)),
+                    shannon_entropy: parseFloat(kineticState.entropyBits.toFixed(2)),
+                    timestamp: new Date().toISOString()
+                };
+                closeKineticModal();
+                executeEncryption(seedHex, metrics);
+            });
+        }
+
+        if (kineticCanvas) {
+            kineticCanvas.addEventListener('mousemove', handleCursorMove);
+            kineticCanvas.addEventListener('mouseleave', () => {
+                kineticState.lastX = null;
+                kineticState.lastY = null;
+                kineticState.lastHeading = null;
+                if (canvasLiveBadge && kineticState.saturation < 100) {
+                    canvasLiveBadge.textContent = "PAUSED • RETURN CURSOR TO RESUME";
+                    canvasLiveBadge.classList.remove("capturing");
+                }
+            });
+            kineticCanvas.addEventListener('mouseenter', () => {
+                if (canvasLiveBadge && kineticState.saturation < 100) {
+                    canvasLiveBadge.textContent = "SAMPLING CURVE DYNAMICS...";
+                    canvasLiveBadge.classList.add("capturing");
+                }
+            });
+        }
+
         // 2. Encrypt with One-Time Pad
-        btnEncrypt.addEventListener('click', async () => {
+        btnEncrypt.addEventListener('click', () => {
+            if (!state.selectedSourceFile) return;
+            openKineticModal();
+        });
+
+        async function executeEncryption(kineticSeedHex, metricsObj) {
             if (!state.selectedSourceFile) return;
 
             btnEncrypt.disabled = true;
@@ -1398,6 +1875,12 @@
 
             const formData = new FormData();
             formData.append('file', state.selectedSourceFile);
+            if (kineticSeedHex) {
+                formData.append('mouse_entropy', kineticSeedHex);
+            }
+            if (metricsObj) {
+                formData.append('curve_metrics', JSON.stringify(metricsObj));
+            }
 
             try {
                 const res = await fetch('/api/file/encrypt', {
@@ -1426,6 +1909,25 @@
                 hexPlain.textContent = data.preview_original_hex || '—';
                 hexPad.textContent = data.preview_pad_hex || '—';
                 hexCipher.textContent = data.preview_cipher_hex || '—';
+
+                // Display Kinetic Curve Badge if injected
+                if (kineticBadgeDisplay) {
+                    if (data.kinetic_injected && data.curve_metrics) {
+                        const cm = data.curve_metrics;
+                        if (kineticBadgeText) {
+                            kineticBadgeText.textContent = `[ KINETIC CURVE INJECTED: L=${cm.arc_length}px · Θ=${cm.curvature_rad}rad · H=${cm.shannon_entropy}b ]`;
+                        }
+                        kineticBadgeDisplay.classList.remove('hidden');
+                    } else if (data.kinetic_injected) {
+                        if (kineticBadgeText) {
+                            kineticBadgeText.textContent = `[ KINETIC CURVE ENTROPY INJECTED ]`;
+                        }
+                        kineticBadgeDisplay.classList.remove('hidden');
+                    } else {
+                        kineticBadgeDisplay.classList.add('hidden');
+                    }
+                }
+
                 resultBox.classList.remove('hidden');
 
                 // Auto-fill right panel verification inputs
@@ -1446,7 +1948,7 @@
                     btnEncrypt.disabled = false;
                 }, 2000);
             }
-        });
+        }
 
         // 3. Download Buttons
         btnDownloadEnc.addEventListener('click', () => {
@@ -1688,43 +2190,49 @@
             }
         });
 
-        // 8. Simulate Single-Bit Tampering
-        btnTamperSim.addEventListener('click', async () => {
-            const cipherPayload = state.cipherFile || state.cipherBlob;
-            const padPayload = state.padFile || state.padBlob;
+        // 8. Copy to Clipboard
+        if (btnCopyClipboard) {
+            btnCopyClipboard.addEventListener('click', async () => {
+                const encHmac = (hmacDisplay && hmacDisplay.textContent && hmacDisplay.textContent !== "—") ? hmacDisplay.textContent.trim() : "";
+                const expHmac = state.expectedHmac || (inputHmac ? inputHmac.value : "").trim();
+                const textContent = (txtPreview && !txtPreview.classList.contains('hidden')) ? txtPreview.textContent : "";
+                
+                const targetText = encHmac || expHmac || textContent;
 
-            if (!cipherPayload || !padPayload) {
-                alert("Please provide both ciphertext and pad before simulating tampering.");
-                return;
-            }
+                if (!targetText) {
+                    btnCopyClipboard.innerHTML = '<span class="hud-bracket">[</span> NO HMAC TO COPY <span class="hud-bracket">]</span>';
+                    setTimeout(() => {
+                        btnCopyClipboard.innerHTML = '<span class="hud-bracket">[</span> COPY TO CLIPBOARD <span class="hud-bracket">]</span>';
+                    }, 1800);
+                    return;
+                }
 
-            btnTamperSim.disabled = true;
-            btnTamperSim.innerHTML = '<span class="hud-bracket">[</span> INJECTING BIT FLIP... <span class="hud-bracket">]</span>';
+                try {
+                    if (navigator.clipboard && navigator.clipboard.writeText) {
+                        await navigator.clipboard.writeText(targetText);
+                    } else {
+                        const ta = document.createElement('textarea');
+                        ta.value = targetText;
+                        ta.style.position = 'fixed';
+                        ta.style.opacity = '0';
+                        document.body.appendChild(ta);
+                        ta.select();
+                        document.execCommand('copy');
+                        document.body.removeChild(ta);
+                    }
 
-            const formData = new FormData();
-            formData.append('ciphertext_file', cipherPayload, `${state.originalFilename || 'document'}.enc`);
-            formData.append('pad_file', padPayload, `${state.originalFilename || 'document'}.pad`);
-            formData.append('expected_hmac', (inputHmac.value || "").trim());
-
-            try {
-                const res = await fetch('/api/file/tamper-sim', {
-                    method: 'POST',
-                    body: formData,
-                });
-
-                const data = await res.json();
-                verifyBanner.className = 'vault-banner violation';
-                verifyBanner.innerHTML = '✕ INTEGRITY VIOLATION DETECTED — DECRYPTION REJECTED (SINGLE-BIT TAMPER INJECTED)';
-                verifyBanner.classList.remove('hidden');
-                docViewer.classList.add('hidden');
-            } catch (err) {
-                console.error(err);
-                showIntegrityViolation(err.message);
-            } finally {
-                btnTamperSim.innerHTML = '<span class="hud-bracket">[</span> SIMULATE SINGLE-BIT TAMPERING <span class="hud-bracket">]</span>';
-                btnTamperSim.disabled = false;
-            }
-        });
+                    btnCopyClipboard.classList.add('copied');
+                    btnCopyClipboard.innerHTML = '<span class="hud-bracket">[</span> ✓ COPIED TO CLIPBOARD <span class="hud-bracket">]</span>';
+                    setTimeout(() => {
+                        btnCopyClipboard.classList.remove('copied');
+                        btnCopyClipboard.innerHTML = '<span class="hud-bracket">[</span> COPY TO CLIPBOARD <span class="hud-bracket">]</span>';
+                    }, 2000);
+                } catch (err) {
+                    console.error("Clipboard copy failed:", err);
+                    alert("Could not copy to clipboard: " + err.message);
+                }
+            });
+        }
     }
 
     if (document.readyState === "loading") {

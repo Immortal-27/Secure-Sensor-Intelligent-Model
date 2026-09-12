@@ -95,9 +95,6 @@ def detect_esp32() -> Optional[str]:
         if p["is_esp"]:
             logger.info(f"ESP32 candidate identified: {p['device']} ({p['description']})")
             return p["device"]
-    if ports:
-        logger.info(f"No explicitly branded ESP32 found; defaulting to first available port {ports[0]['device']}")
-        return ports[0]["device"]
     return None
 
 
@@ -435,12 +432,14 @@ class SensorBridge:
     """
 
     def __init__(self):
-        self.source: str = "SIMULATOR/CSPRNG"
+        self.source: str = "DISCONNECTED (NO ESP32)"
         self._hardware: Optional[HardwareSerialReader] = None
         self._simulator: VirtualSensorGenerator = VirtualSensorGenerator()
         self.active_port: Optional[str] = None
         self.active_baud: int = SERIAL_BAUD
-        self.last_status_msg: str = "Simulator active (CSPRNG entropy)"
+        self.last_status_msg: str = "Scanning for ESP32 hardware..."
+        self._last_auto_scan: float = 0.0
+        self._packet_id: int = 0
 
         # Try to detect ESP32 on startup
         self.auto_connect()
@@ -450,18 +449,18 @@ class SensorBridge:
         return self._hardware is not None and self._hardware.is_open
 
     def get_channel_labels(self) -> list[str]:
-        return HARDWARE_LABELS if self.is_hardware else SENSOR_LABELS
+        return HARDWARE_LABELS
 
     def get_channel_units(self) -> list[str]:
-        return HARDWARE_UNITS if self.is_hardware else SIMULATOR_UNITS
+        return HARDWARE_UNITS
 
     def auto_connect(self) -> tuple[bool, str]:
         """Attempt to find and connect to an ESP32 port automatically."""
         port = detect_esp32()
         if port:
             return self.connect_port(port, self.active_baud)
-        self.source = "SIMULATOR/CSPRNG"
-        self.last_status_msg = "No ESP32 detected - using Simulator"
+        self.source = "DISCONNECTED (NO ESP32)"
+        self.last_status_msg = "No ESP32 detected — plug in USB device"
         return False, self.last_status_msg
 
     def connect_port(self, port: str, baud: int = SERIAL_BAUD) -> tuple[bool, str]:
@@ -478,19 +477,22 @@ class SensorBridge:
             logger.info(f"✓ {self.last_status_msg}")
             return True, self.last_status_msg
         else:
-            self.source = "SIMULATOR/CSPRNG"
+            self.source = "DISCONNECTED (NO ESP32)"
             self.last_status_msg = f"Failed to connect to {port}"
             return False, self.last_status_msg
 
     def disconnect(self) -> tuple[bool, str]:
-        """Disconnect physical hardware and revert to simulator."""
+        """Disconnect physical hardware."""
         if self._hardware:
-            self._hardware.close()
+            try:
+                self._hardware.close()
+            except Exception:
+                pass
             self._hardware = None
         self.active_port = None
-        self.source = "SIMULATOR/CSPRNG"
-        self.last_status_msg = "Disconnected from hardware - Simulator active"
-        logger.info("Switched to Simulator source")
+        self.source = "DISCONNECTED (NO ESP32)"
+        self.last_status_msg = "ESP32 disconnected — waiting for hardware link"
+        logger.info("ESP32 disconnected — waiting for hardware link")
         return True, self.last_status_msg
 
     def get_hardware_info(self) -> dict:
@@ -510,26 +512,53 @@ class SensorBridge:
 
     def read_frame(self) -> Optional[dict]:
         """
-        Read one sensor frame from the active source (hardware or simulator).
+        Read one sensor frame from physical hardware if connected.
+        If not connected or unplugged, returns null data for ESP32 channels (no mock data).
         """
+        now = time.time()
+
         if self.is_hardware:
-            frame = self._hardware.read_frame()
-            if frame:
-                return frame
-            # If hardware was disconnected or timed out for > 10 seconds
-            if time.time() - self._hardware.last_seen > 10.0:
-                logger.warning(f"No data received from {self.active_port} for 10s — falling back to simulator")
+            try:
+                frame = self._hardware.read_frame()
+                if frame:
+                    return frame
+
+                # If port closed during read_frame
+                if not self.is_hardware:
+                    logger.warning("Hardware connection lost during read")
+                    self.disconnect()
+                # If silent / unplugged for > 2.0s
+                elif now - self._hardware.last_seen > 2.0:
+                    logger.warning(f"No data from {self.active_port} for >2.0s — ESP32 disconnected")
+                    self.disconnect()
+                elif self._hardware._last_valid_frame:
+                    return self._hardware._last_valid_frame
+            except Exception as exc:
+                logger.error(f"Error reading hardware frame: {exc}")
                 self.disconnect()
-                return self._simulator.generate_reading()
 
-            # When hardware is active, keep returning the latest physical hardware frame
-            # Never overwrite with mock simulator data!
-            if self._hardware._last_valid_frame:
-                return self._hardware._last_valid_frame
+        # If disconnected, periodically check for ESP32 reconnect (every 2.0s)
+        if not self.is_hardware:
+            if now - self._last_auto_scan > 2.0:
+                self._last_auto_scan = now
+                port = detect_esp32()
+                if port:
+                    logger.info(f"ESP32 device detected on {port} — attempting auto-reconnect")
+                    self.connect_port(port, self.active_baud)
 
-            return None
+        # Return disconnected frame with nulls for physical sensors (CH 0-7)
+        if not self.is_hardware:
+            self._packet_id += 1
+            from geo_weather import geo_weather_provider
+            live_lat, live_lon, live_pressure = geo_weather_provider.get_realtime_readings()
+            return {
+                "v": [None] * 8 + [round(live_lat, 4), round(live_pressure, 2)],
+                "pad": None,
+                "pid": self._packet_id,
+                "scenario": "NO_HARDWARE",
+            }
 
-        return self._simulator.generate_reading()
+        return None
 
     def close(self) -> None:
         """Clean up hardware connection."""
