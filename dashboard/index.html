@@ -7,7 +7,7 @@
     <title>Quantum-Resilient IoT Telemetry Pipeline</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
     <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon.png">
-    <link rel="stylesheet" href="/static/style.css?v=2.0">
+    <link rel="stylesheet" href="/static/style.css?v=2.1">
 </head>
 <body>
     <!-- WebThreads Animated Shader Background -->
@@ -392,6 +392,60 @@
                 </div>
             </div>
         </div>
+
+        <!-- ═══════ STAGNANT FOOTER & PRIVACY POLICY ═══════ -->
+        <footer class="app-footer glass-card">
+            <div class="footer-privacy-header">
+                <div class="section-title">Privacy Policy</div>
+                <div class="footer-badges">
+                    <span class="hud-badge-pill success">[ ZERO SERVER STORAGE ]</span>
+                    <span class="hud-badge-pill cyan">[ CLIENT LOCAL MEMORY ONLY ]</span>
+                    <span class="hud-badge-pill amber">[ ZERO TELEMETRY LOGGING ]</span>
+                </div>
+            </div>
+
+            <div class="footer-privacy-grid">
+                <div class="footer-policy-item">
+                    <div class="policy-item-title">
+                        <span class="policy-icon">🛡️</span>
+                        <span>Zero Server File Storage</span>
+                    </div>
+                    <p class="policy-item-desc">
+                        Any files you upload here (.txt, .pdf, or arbitrary binary formats) for One-Time Pad encryption or decryption are <strong>never stored, cached, or written to disk on any server</strong>. Files are processed exclusively in transient volatile memory (RAM) for the milliseconds needed to compute the mathematical XOR masking, and are instantly purged upon response completion.
+                    </p>
+                </div>
+
+                <div class="footer-policy-item">
+                    <div class="policy-item-title">
+                        <span class="policy-icon">⚡</span>
+                        <span>Ephemeral Local Memory</span>
+                    </div>
+                    <p class="policy-item-desc">
+                        All generated cryptographic pads, ciphertexts, and kinetic curve trajectories live strictly inside your <strong>browser's temporary local execution memory</strong>. No user data is stored in databases, tracking cookies, or persistent storage. Closing your browser tab or refreshing the page immediately purges all sensitive cryptographic artifacts from memory.
+                    </p>
+                </div>
+
+                <div class="footer-policy-item">
+                    <div class="policy-item-title">
+                        <span class="policy-icon">🔒</span>
+                        <span>No User Profiling or Tracking</span>
+                    </div>
+                    <p class="policy-item-desc">
+                        We do not collect, monitor, or retain user identities, IP addresses, or personal telemetry. This pipeline operates on strict <strong>mathematical zero-knowledge principles</strong>—the server functions solely as an ephemeral cryptographic node delivering information-theoretic confidentiality without user surveillance.
+                    </p>
+                </div>
+            </div>
+
+            <div class="footer-bottom-bar">
+                <div class="footer-system-id">
+                    <span class="hud-bracket">[</span> SSIM // SECURE SENSOR INTELLIGENT MODEL <span class="hud-bracket">]</span> &bull; SHANNON INFORMATION-THEORETIC ZERO-STORAGE ARCHITECTURE
+                </div>
+                <div class="footer-audit-status">
+                    <span class="status-dot connected"></span>
+                    <span>SERVER STATUS: EPHEMERAL STATELESS RAM ONLY</span>
+                </div>
+            </div>
+        </footer>
 
     </div>
 
