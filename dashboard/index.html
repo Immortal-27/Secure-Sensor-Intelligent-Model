@@ -7,7 +7,7 @@
     <title>Quantum-Resilient IoT Telemetry Pipeline</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
     <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon.png">
-    <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="/static/style.css?v=2.0">
 </head>
 <body>
     <!-- WebThreads Animated Shader Background -->
@@ -412,7 +412,7 @@
 
             <!-- Kinetic Capture Canvas -->
             <div class="kinetic-canvas-box" id="kinetic-canvas-box">
-                <canvas id="cursor-curve-canvas" width="620" height="220"></canvas>
+                <canvas id="cursor-curve-canvas" width="1000" height="420"></canvas>
                 <div class="kinetic-crosshair"></div>
                 <div class="canvas-live-badge" id="canvas-live-badge">READY &bull; MOVE CURSOR INSIDE BOX</div>
             </div>
@@ -421,7 +421,7 @@
             <div class="kinetic-metrics-grid">
                 <div class="kinetic-metric-item">
                     <span class="metric-lbl">TRAJECTORY SAMPLES:</span>
-                    <span class="metric-val" id="stat-curve-points">0 / 120</span>
+                    <span class="metric-val" id="stat-curve-points">0 / 100</span>
                 </div>
                 <div class="kinetic-metric-item">
                     <span class="metric-lbl">CURVE ARC LENGTH:</span>
@@ -456,6 +456,6 @@
     </div>
 
     <script src="/static/webthreads.js"></script>
-    <script src="/static/app.js"></script>
+    <script src="/static/app.js?v=2.0"></script>
 </body>
 </html>

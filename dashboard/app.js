@@ -1781,11 +1781,18 @@
 
             updateKineticUI();
 
+            kineticOverlay.classList.remove('hidden');
+
+            // Dynamically calibrate canvas resolution to the rendered bounding size
+            const rect = kineticCanvas.getBoundingClientRect();
+            if (rect.width > 0 && rect.height > 0) {
+                kineticCanvas.width = Math.round(rect.width);
+                kineticCanvas.height = Math.round(rect.height);
+            }
+
             const ctx = kineticCanvas.getContext('2d');
             ctx.fillStyle = "#050810";
             ctx.fillRect(0, 0, kineticCanvas.width, kineticCanvas.height);
-
-            kineticOverlay.classList.remove('hidden');
 
             if (kineticState.animId) cancelAnimationFrame(kineticState.animId);
             kineticState.animId = requestAnimationFrame(renderKineticCanvas);
@@ -1857,6 +1864,20 @@
                 if (canvasLiveBadge && kineticState.saturation < 100) {
                     canvasLiveBadge.textContent = "SAMPLING CURVE DYNAMICS...";
                     canvasLiveBadge.classList.add("capturing");
+                }
+            });
+
+            window.addEventListener('resize', () => {
+                if (kineticState.active && kineticCanvas && kineticOverlay && !kineticOverlay.classList.contains('hidden')) {
+                    const r = kineticCanvas.getBoundingClientRect();
+                    if (r.width > 0 && r.height > 0) {
+                        const newW = Math.round(r.width);
+                        const newH = Math.round(r.height);
+                        if (kineticCanvas.width !== newW || kineticCanvas.height !== newH) {
+                            kineticCanvas.width = newW;
+                            kineticCanvas.height = newH;
+                        }
+                    }
                 }
             });
         }
